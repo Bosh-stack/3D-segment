@@ -35,6 +35,13 @@ CONF.PATH.SCANNET = os.path.join(CONF.PATH.DATA_OUT, "datasets", "OpenSG_ScanNet
 CONF.PATH.CHECKPOINTS = os.path.join(CONF.PATH.DATA_OUT, "checkpoints")
 CONF.PATH.FEATURES = os.path.join(CONF.PATH.DATA_OUT, "features")
 
+# Custom dataset example
+CONF.PATH.MYSET_ROOT = "/data/Open3DSG_trainset"
+CONF.PATH.MYSET_CHECKPOINTS = os.path.join(CONF.PATH.MYSET_ROOT, "checkpoints")
+CONF.PATH.MYSET_FEATURES_OUT = "open3dsg/output/features/myset"
+CONF.PATH.MYSET_PREPROC_OUT = "open3dsg/output/preprocessed/myset"
+CONF.PATH.MYSET_GRAPHS_OUT = "open3dsg/output/graphs/myset"
+
 # MLOps
 CONF.PATH.MLOPS = os.path.join(CONF.PATH.BASE, "mlops")  # MLOps directory
 CONF.PATH.MLFLOW = os.path.join(CONF.PATH.MLOPS, "opensg", "mlflow")  # Output directory for MLFlow data

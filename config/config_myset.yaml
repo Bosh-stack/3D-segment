@@ -1,0 +1,21 @@
+PATHS:
+  myset_root: "/data/Open3DSG_trainset"
+  checkpoints: "/data/Open3DSG_trainset/checkpoints"
+  features_out: "open3dsg/output/features/myset"
+  preproc_out:  "open3dsg/output/preprocessed/myset"
+  graphs_out:   "open3dsg/output/graphs/myset"
+
+DATASET:
+  name: "myset"
+  use_rgb: true
+  top_k_frames: 5
+  scales: 3
+
+TRAINING:
+  epochs: 100
+  batch_size: 4
+  workers: 8
+  gpus: 4
+  mixed_precision: true
+  clip_model: "OpenSeg"
+  blip: true
