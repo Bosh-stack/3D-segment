@@ -11,7 +11,6 @@ import torch
 import numpy as np
 
 import pytorch_lightning as lightning
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger, MLFlowLogger
 from pytorch_lightning.strategies import DDPStrategy
 from open3dsg.config.config import CONF
@@ -58,7 +57,7 @@ def get_args():
                         help='max number of edges in the graph. Should correspond to n*(n-1) nodes')
 
     # data params
-    parser.add_argument('--dataset', default='scannet', help="['scannet','3rscan']")
+    parser.add_argument('--dataset', default='scannet', help="['scannet']")
     parser.add_argument('--mini_dataset', action='store_true',
                         help="only load a tiny fraction of data for faster debugging")
     parser.add_argument('--augment', action="store_true",
@@ -94,17 +93,11 @@ def get_args():
     parser.add_argument('--n_beams', type=int, default=5, help="number of beams for beam search in LLM output")
     parser.add_argument('--gt_objects', action="store_true", help="Use GT objects for predicate prediction")
     parser.add_argument('--vis_graphs', action="store_true", help="save graph predictions to disk")
-    parser.add_argument('--predict_materials', action="store_true",
-                        help="predict materials from 3rscan seperate testset")
-    parser.add_argument('--test_scans_3rscan', action="store_true",
-                        help="test on 3rscan test set scans which are not labeled in 3dssg, it is needed for the material prediction")
     parser.add_argument('--predict_from_2d', action="store_true", help="predict only using 2d models")
     parser.add_argument('--quick_eval', action='store_true', help="only eval on a few samples")
     parser.add_argument('--object_context', action="store_true", help="prompt clip with: A [object] in a scene")
     parser.add_argument('--update_hparams', action="store_true", help="update hparams from checkpoint")
     parser.add_argument('--manual_mapping', action="store_true", help="Manually map some known predicates to GT")
-    parser.add_argument('--train_only', action='store_true',
-                        help='train without running validation/evaluation')
 
     return parser.parse_args()
 
@@ -180,20 +173,11 @@ if __name__ == "__main__":
     print("Args: %s" % args)
     print("HParams: %s" % hparams)
 
-    if args.train_only:
-        checkpoint_callback = lightning.callbacks.ModelCheckpoint(
-            save_last=True,
-            every_n_epochs=1,
-            verbose=True,
-        )
-    else:
-        checkpoint_callback = lightning.callbacks.ModelCheckpoint(
-            save_top_k=5,
-            verbose=True,
-            monitor='val/loss',
-            mode='min',
-            save_last=True,
-        )
+    checkpoint_callback = lightning.callbacks.ModelCheckpoint(
+        save_last=True,
+        every_n_epochs=1,
+        verbose=True,
+    )
 
     bnm_clip = 1e-2
 
@@ -209,8 +193,6 @@ if __name__ == "__main__":
 
     hparams['start_time'] = datetime.now()
     callbacks = [LRLoggingCallback(), checkpoint_callback]
-    if not args.train_only:
-        callbacks.insert(1, EarlyStopping(monitor="val/loss", mode="min", patience=10))
 
     trainer = lightning.Trainer(
         min_epochs=args.epochs,
@@ -222,7 +204,7 @@ if __name__ == "__main__":
         sync_batchnorm=True,
         callbacks=callbacks,
         deterministic=False,
-        check_val_every_n_epoch=1,
+        check_val_every_n_epoch=0,
         num_sanity_val_steps=0,
         log_every_n_steps=1 if args.mini_dataset else 100,
         accumulate_grad_batches=args.accumulate_grad_batches,
