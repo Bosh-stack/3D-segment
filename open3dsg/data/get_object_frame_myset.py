@@ -1,45 +1,133 @@
+#!/usr/bin/env python3
+"""
+Associate each 3D instance (Segment3D .ply) with the TOP-K most visible RGB frames
+for the custom "myset" dataset.
+
+This version is **robust to different camera-metadata schemas**. It supports:
+- Direct fx/fy/cx/cy keys
+- 3x3 intrinsic matrices under keys: "K", "intrinsic", "intrinsic_matrix"
+- Focal length & pixel size blocks ("focal" / "pixel" / "principal") as in the user's JSON
+- Horizontal/vertical FOV in degrees ("fovx"/"fovy" or nested in "fov")
+- Extrinsics as quaternion+translation (flat or nested), or full 4x4 matrices
+
+Outputs one JSON per scan: mapping instance_id -> [frame_ids]
+
+Usage:
+    python open3dsg/data/get_object_frame_myset.py \
+        --root  /data/Open3DSG_trainset \
+        --out   open3dsg/output/preprocessed/myset/frames \
+        --top_k 5
+"""
+
 import argparse
 import json
 from pathlib import Path
+from typing import Tuple
 
 import numpy as np
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 
 
+# -----------------------------
+# Intrinsics / Extrinsics utils
+# -----------------------------
+
+def _intrinsics_from_focal_pixel_block(m: dict) -> Tuple[np.ndarray, int, int]:
+    F = m.get("focal", {}).get("focalLength")
+    px = m.get("pixel", {}).get("pixelWidth")
+    py = m.get("pixel", {}).get("pixelHeight")
+    w = (m.get("image", {}) or {}).get("imageWidth") or m.get("width") or m.get("W") or m.get("w")
+    h = (m.get("image", {}) or {}).get("imageHeight") or m.get("height") or m.get("H") or m.get("h")
+    if F is None or px is None or py is None:
+        return None, None, None
+    fx = float(F) / float(px)
+    fy = float(F) / float(py)
+    cx = m.get("principal", {}).get("principalPointX")
+    cy = m.get("principal", {}).get("principalPointY")
+    if cx is None or cy is None:
+        if w is None or h is None:
+            raise KeyError("Principal point missing and image size unknown to infer center")
+        cx, cy = (float(w) - 1) / 2.0, (float(h) - 1) / 2.0
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+    return K, int(w), int(h)
+
+
+def _intrinsics_from_fov(m: dict) -> Tuple[np.ndarray, int, int]:
+    # Accept fovx/fovy in degrees. Need width/height to convert: fx = (w/2) / tan(fovx/2)
+    fovx = m.get("fovx") or (m.get("fov", {}) or {}).get("x")
+    fovy = m.get("fovy") or (m.get("fov", {}) or {}).get("y")
+    w = (m.get("image", {}) or {}).get("imageWidth") or m.get("width") or m.get("W") or m.get("w")
+    h = (m.get("image", {}) or {}).get("imageHeight") or m.get("height") or m.get("H") or m.get("h")
+    cx = m.get("principal", {}).get("principalPointX") if "principal" in m else None
+    cy = m.get("principal", {}).get("principalPointY") if "principal" in m else None
+    if (fovx is None and fovy is None) or w is None or h is None:
+        return None, None, None
+    import math
+    if fovx is not None:
+        fx = (float(w) / 2.0) / math.tan(float(fovx) * math.pi / 360.0)
+    else:
+        fx = None
+    if fovy is not None:
+        fy = (float(h) / 2.0) / math.tan(float(fovy) * math.pi / 360.0)
+    else:
+        fy = None
+    # If only one is provided, reuse it (assuming square pixels)
+    if fx is None and fy is not None:
+        fx = fy
+    if fy is None and fx is not None:
+        fy = fx
+    if cx is None:
+        cx = (float(w) - 1) / 2.0
+    if cy is None:
+        cy = (float(h) - 1) / 2.0
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+    return K, int(w), int(h)
+
+
 def load_cam(meta_file: Path):
-    """Load camera intrinsics and extrinsics from a metadata file.
-
-    The custom dataset used for ``myset`` does not enforce a strict format for
-    the camera metadata.  In the original implementation the JSON file was
-    expected to contain ``fx``/``fy``/``cx``/``cy`` together with a quaternion
-    and translation.  If these keys are missing we try to fall back to more
-    generic names in order to support different export tools.
-    """
-
+    """Load intrinsics/extrinsics from flexible JSON schemas."""
     m = json.loads(meta_file.read_text())
 
-    # --- intrinsics -------------------------------------------------------
-    if all(k in m for k in ("fx", "fy", "cx", "cy")):
-        fx, fy = m["fx"], m["fy"]
-        cx, cy = m["cx"], m["cy"]
+    # -------- intrinsics --------
+    K = None
+    w = h = None
+
+    # Direct full matrix
+    for key in ("K", "intrinsic", "intrinsic_matrix"):
+        if key in m:
+            K = np.array(m[key], dtype=np.float32).reshape(3, 3)
+            break
+
+    # fx/fy/cx/cy flat keys
+    if K is None and all(k in m for k in ("fx", "fy", "cx", "cy")):
+        fx, fy, cx, cy = map(float, (m["fx"], m["fy"], m["cx"], m["cy"]))
         K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
-    elif "K" in m:  # already a 3x3 matrix
-        K = np.array(m["K"], dtype=np.float32).reshape(3, 3)
-    elif "intrinsic" in m:
-        K = np.array(m["intrinsic"], dtype=np.float32).reshape(3, 3)
-    elif "intrinsic_matrix" in m:
-        K = np.array(m["intrinsic_matrix"], dtype=np.float32).reshape(3, 3)
-    else:
+        w = m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
+        h = m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
+
+    # focal/pixel/principal block (user example)
+    if K is None:
+        K, w, h = _intrinsics_from_focal_pixel_block(m)
+
+    # FOV-based
+    if K is None:
+        K, w, h = _intrinsics_from_fov(m)
+
+    if K is None:
         raise KeyError("Camera intrinsics not found in metadata")
 
-    # image size
-    w = m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
-    h = m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
+    # image size if still missing
     if w is None or h is None:
-        raise KeyError("Image width/height not found in metadata")
+        w = (m.get("image", {}) or {}).get("imageWidth") or m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
+        h = (m.get("image", {}) or {}).get("imageHeight") or m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
+        if w is None or h is None:
+            raise KeyError("Image width/height not found in metadata")
 
-    # --- extrinsics -------------------------------------------------------
+    # -------- extrinsics --------
+    T = None
+
+    # flat keys (qw,qx,qy,qz,tx,ty,tz)
     if all(k in m for k in ("qw", "qx", "qy", "qz", "tx", "ty", "tz")):
         quat = [m["qw"], m["qx"], m["qy"], m["qz"]]
         rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
@@ -47,26 +135,42 @@ def load_cam(meta_file: Path):
         T = np.eye(4, dtype=np.float32)
         T[:3, :3] = rot
         T[:3, 3] = trans
-    elif "pose" in m:
-        T = np.array(m["pose"], dtype=np.float32).reshape(4, 4)
-    elif "extrinsic" in m:
-        T = np.array(m["extrinsic"], dtype=np.float32).reshape(4, 4)
-    elif "transform" in m:
-        T = np.array(m["transform"], dtype=np.float32).reshape(4, 4)
-    else:
+
+    # nested dicts (rotation{x,y,z,w}, translation{x,y,z})
+    if T is None and "rotation" in m and "translation" in m:
+        r = m["rotation"]
+        t = m["translation"]
+        quat = [r.get("w"), r.get("x"), r.get("y"), r.get("z")]
+        if None not in quat:
+            rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
+            trans = np.array([t.get("x"), t.get("y"), t.get("z")], dtype=np.float32)
+            T = np.eye(4, dtype=np.float32)
+            T[:3, :3] = rot
+            T[:3, 3] = trans
+
+    # full matrix
+    for key in ("pose", "extrinsic", "transform"):
+        if T is None and key in m:
+            T = np.array(m[key], dtype=np.float32).reshape(4, 4)
+
+    if T is None:
         raise KeyError("Camera extrinsics not found in metadata")
 
     return K, T, int(w), int(h)
 
 
-def project_points(pts_cam, K):
+# -----------------------------
+# Visibility computation
+# -----------------------------
+
+def project_points(pts_cam: np.ndarray, K: np.ndarray):
     zs = pts_cam[:, 2]
     uvs = (K @ pts_cam[:, :3].T).T
     uvs = uvs[:, :2] / zs[:, None]
     return uvs, zs
 
 
-def visible_ratio(points_world, K, T_world_cam, w, h):
+def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray, w: int, h: int) -> float:
     pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
     pts_cam = (np.linalg.inv(T_world_cam) @ pts_world_h.T).T[:, :3]
     infront = pts_cam[:, 2] > 0
@@ -76,6 +180,10 @@ def visible_ratio(points_world, K, T_world_cam, w, h):
     inside = (uvs[:, 0] >= 0) & (uvs[:, 0] < w) & (uvs[:, 1] >= 0) & (uvs[:, 1] < h)
     return float(inside.sum()) / float(points_world.shape[0])
 
+
+# -----------------------------
+# Main
+# -----------------------------
 
 def main():
     ap = argparse.ArgumentParser()
@@ -101,11 +209,19 @@ def main():
         for inst_idx, pts in enumerate(inst_pts):
             scores = []
             for img_path in img_files:
-                idx = int(img_path.stem.split("_")[-1])
+                try:
+                    idx = int(img_path.stem.split("_")[-1])
+                except Exception:
+                    # if naming differs, fall back to enumeration index
+                    idx = img_files.index(img_path)
                 meta = scan / f"im_metadata_{idx}.json"
                 if not meta.exists():
                     continue
-                K, T, w, h = load_cam(meta)
+                try:
+                    K, T, w, h = load_cam(meta)
+                except Exception as e:
+                    print(f"[WARN] {scan_id} frame {idx}: {e}")
+                    continue
                 score = visible_ratio(pts, K, T, w, h)
                 scores.append((idx, score))
             top = sorted(scores, key=lambda x: -x[1])[: args.top_k]
