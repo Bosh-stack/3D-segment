@@ -1,38 +1,4 @@
-<!-- PROJECT LOGO -->
-
-<p align="center">
-<h1>
-  Open3DSG: Open-Vocabulary 3D Scene Graphs from Point Clouds with Queryable Objects and Open-Set Relationships
-</h1>
-  <p align="center">
-    <a href="https://kochsebastian.com/"><strong>Sebastian Koch</strong></a>
-    ·
-    <a href="https://scholar.google.com/citations?user=U3KSTwkAAAAJ&hl=en"><strong>Narunas Vaskevicius</strong></a>
-    ·
-    <a href="https://scholar.google.com/citations?hl=en&user=k4m1c6EAAAAJ"><strong>Mirco Colosi</strong></a>
-    <br>
-    <a href="https://phermosilla.github.io/"><strong>Pedro Hermosilla</strong></a>
-    ·
-    <a href="https://viscom.uni-ulm.de/members/timo-ropinski/"><strong>Timo Ropinski</strong></a>
-  </p>
-  <h2 align="center">CVPR 2024</h2>
-  <h3 align="center"><a href="https://arxiv.org/abs/2402.12259">Paper</a> | <a href="https://kochsebastian.com/open3dsg">Project Page</a></h3>
-  <div align="center"></div>
-</p>
-<p align="center">
-  <a href="">
-    <img src="https://github.com/kochsebastian/kochsebastian.github.io/blob/master/media/open3dsg/teaser.png?raw=true" alt="Logo" width="85%">
-  </a>
-</p>
-<p align="center">
-We present <strong>Open3DSG</strong> the first approach
-for learning to predict open-vocabulary 3D scene graphs from
-3D point clouds. The advantage of our method is that it can be
-queried and prompted for any instance in the scene, such as the
-TV and Wall, to predict fine-grained semantic descriptions of objects and relationships.
-</p>
-<br>
-
+<
 ## Setup
 
 ```bash
