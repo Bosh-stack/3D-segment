@@ -142,24 +142,25 @@ class D3SSGModule(lightning.LightningModule):
         else:
             D3SSG_VAL, D3SSG_TRAIN = None, None
         if stage == 'fit':
-            if self.hparams.get('test_scans_3rscan'):
-                print('Evaluating on 3RScan test set')
-            self.val_dataset = Open2D3DSGDataset(
-                relationships_R3SCAN=D3SSG_VAL if not self.hparams.get('test_scans_3rscan') else D3SSG_TEST,
-                relationships_scannet=SCANNET_VAL,
-                openseg=self.hparams['clip_model'] == 'OpenSeg',
-                img_dim=img_dim,
-                rel_img_dim=rel_img_dim,
-                top_k_frames=self.hparams['top_k_frames'],
-                scales=self.hparams['scales'],
-                mini=self.hparams['mini_dataset'],
-                load_features=self.hparams.get('load_features', None),
-                blip=self.hparams.get('blip', False),
-                llava=self.hparams.get('llava', False),
-                half=self.hparams.get('quick_eval', False),
-                max_objects=self.hparams.get('max_nodes', None),
-                max_rels=self.hparams.get('max_edges', None)
-            )
+            if not self.hparams.get('train_only'):
+                if self.hparams.get('test_scans_3rscan'):
+                    print('Evaluating on 3RScan test set')
+                self.val_dataset = Open2D3DSGDataset(
+                    relationships_R3SCAN=D3SSG_VAL if not self.hparams.get('test_scans_3rscan') else D3SSG_TEST,
+                    relationships_scannet=SCANNET_VAL,
+                    openseg=self.hparams['clip_model'] == 'OpenSeg',
+                    img_dim=img_dim,
+                    rel_img_dim=rel_img_dim,
+                    top_k_frames=self.hparams['top_k_frames'],
+                    scales=self.hparams['scales'],
+                    mini=self.hparams['mini_dataset'],
+                    load_features=self.hparams.get('load_features', None),
+                    blip=self.hparams.get('blip', False),
+                    llava=self.hparams.get('llava', False),
+                    half=self.hparams.get('quick_eval', False),
+                    max_objects=self.hparams.get('max_nodes', None),
+                    max_rels=self.hparams.get('max_edges', None)
+                )
             self.train_dataset = Open2D3DSGDataset(
                 relationships_R3SCAN=D3SSG_TRAIN,
                 relationships_scannet=SCANNET_TRAIN,
@@ -263,11 +264,15 @@ class D3SSGModule(lightning.LightningModule):
         return train_dataloader
 
     def val_dataloader(self) -> DataLoader:
+        if self.val_dataset is None:
+            return None
         val_dataloader = DataLoader(self.val_dataset, batch_size=self.hparams['batch_size'], shuffle=False,
                                     collate_fn=self.val_dataset.collate_fn, num_workers=self.hparams['workers'], pin_memory=True)
         return val_dataloader
 
     def test_dataloader(self) -> DataLoader:
+        if self.val_dataset is None:
+            return None
         test_dataloader = DataLoader(self.val_dataset, 1, shuffle=False,
                                      collate_fn=self.val_dataset.collate_fn, num_workers=self.hparams['workers'], pin_memory=True)
         return test_dataloader
@@ -806,11 +811,15 @@ class D3SSGModule(lightning.LightningModule):
             elif self.hparams['llava']:
                 rel_clip_model = "LLaVa"
 
-            obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-')+'_Topk_' + str(self.hparams['top_k_frames'])+'_scales_'+str(
-                self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.obj_vis_crit)+'_vis_crit_mask_' + str(self.val_dataset.obj_mask_crit))
+            if self.val_dataset is not None:
+                obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-')+'_Topk_' + str(self.hparams['top_k_frames'])+'_scales_'+str(
+                    self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.obj_vis_crit)+'_vis_crit_mask_' + str(self.val_dataset.obj_mask_crit))
+                rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-')+'_Topk_' + str(
+                    self.hparams['top_k_frames'])+'_scales_'+str(self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.rel_vis_crit))
+            else:
+                obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-') )
+                rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-'))
             obj_valid_path = os.path.join(path, 'export_obj_clip_valids')
-            rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-')+'_Topk_' + str(
-                self.hparams['top_k_frames'])+'_scales_'+str(self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.rel_vis_crit))
             os.makedirs(obj_path, exist_ok=True)
             os.makedirs(obj_valid_path, exist_ok=True)
             os.makedirs(rel_path, exist_ok=True)
