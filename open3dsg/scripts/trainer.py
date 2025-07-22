@@ -90,25 +90,15 @@ class D3SSGModule(lightning.LightningModule):
 
         self.model.apply(inplace_relu)
 
-        self.obj_class_dict = [line.rstrip() for line in open(os.path.join(CONF.PATH.R3SCAN_RAW, "classes.txt"), "r").readlines()]
-        self.pred_class_dict = [line.rstrip() for line in open(os.path.join(
-            CONF.PATH.R3SCAN_RAW, "relationships_custom.txt"), "r").readlines()]
-        self.pred_class_dict_orig = [line.rstrip() for line in open(
-            os.path.join(CONF.PATH.R3SCAN_RAW, "relationships.txt"), "r").readlines()]
-        self.rel2idx = dict(zip(self.pred_class_dict_orig, range(len(self.pred_class_dict_orig))))
-        self.known_mapping = dict(zip(self.pred_class_dict, self.pred_class_dict))
-        self.known_mapping['to the left of'] = 'left of'
-        self.known_mapping['to the right of'] = 'right of'
-        self.known_mapping['next to'] = 'close by'  # 'none'
-        self.known_mapping['above'] = 'higher than'  # 'none'
-        self.known_mapping['under'] = 'lower than'
-        self.known_mapping['placed on top'] = 'standing on'  # 'supported by'
-
-        def map_rel2idx(class_name):
-            return self.rel2idx.get(class_name, 0)
-        self.rel2idx_mapping = np.vectorize(map_rel2idx)
-        self.rel2rel_mapping = np.vectorize(self.known_mapping.get)
-        self.cust_pred2pred = self.rel2idx_mapping(self.rel2rel_mapping(np.array(self.pred_class_dict)))
+        # remove dependency on 3RScan labels when training on custom datasets
+        self.obj_class_dict = []
+        self.pred_class_dict = []
+        self.pred_class_dict_orig = []
+        self.rel2idx = {}
+        self.known_mapping = {}
+        self.rel2idx_mapping = lambda x: []
+        self.rel2rel_mapping = lambda x: []
+        self.cust_pred2pred = []
         self.cosSim1 = torch.nn.CosineSimilarity(dim=1)
         self.cosSim2 = torch.nn.CosineSimilarity(dim=2)
 
@@ -126,9 +116,6 @@ class D3SSGModule(lightning.LightningModule):
     def setup(self, stage: str):
         def load_scan(base_path, file_path):
             return json.load(open(os.path.join(base_path, file_path)))["scans"]
-        D3SSG_TRAIN = load_scan(CONF.PATH.R3SCAN_RAW, "3DSSG_subset/relationships_train.json")
-        D3SSG_VAL = load_scan(CONF.PATH.R3SCAN_RAW, "3DSSG_subset/relationships_validation.json")
-        D3SSG_TEST = load_scan(CONF.PATH.R3SCAN_RAW, "3DSSG_subset/relationships_test.json")
 
         SCANNET_TRAIN = load_scan(CONF.PATH.SCANNET, "subgraphs/relationships_train.json")
         SCANNET_VAL = load_scan(CONF.PATH.SCANNET, "subgraphs/relationships_validation.json")
@@ -137,32 +124,11 @@ class D3SSGModule(lightning.LightningModule):
         rel_img_dim = img_dim
         if self.hparams['edge_model']:
             rel_img_dim = 336 if self.hparams['edge_model'] == 'ViT-L/14@336px' else 224
-        if self.hparams.get('dataset') == '3rscan':
-            SCANNET_VAL, SCANNET_TRAIN = None, None
-        else:
-            D3SSG_VAL, D3SSG_TRAIN = None, None
+
         if stage == 'fit':
-            if not self.hparams.get('train_only'):
-                if self.hparams.get('test_scans_3rscan'):
-                    print('Evaluating on 3RScan test set')
-                self.val_dataset = Open2D3DSGDataset(
-                    relationships_R3SCAN=D3SSG_VAL if not self.hparams.get('test_scans_3rscan') else D3SSG_TEST,
-                    relationships_scannet=SCANNET_VAL,
-                    openseg=self.hparams['clip_model'] == 'OpenSeg',
-                    img_dim=img_dim,
-                    rel_img_dim=rel_img_dim,
-                    top_k_frames=self.hparams['top_k_frames'],
-                    scales=self.hparams['scales'],
-                    mini=self.hparams['mini_dataset'],
-                    load_features=self.hparams.get('load_features', None),
-                    blip=self.hparams.get('blip', False),
-                    llava=self.hparams.get('llava', False),
-                    half=self.hparams.get('quick_eval', False),
-                    max_objects=self.hparams.get('max_nodes', None),
-                    max_rels=self.hparams.get('max_edges', None)
-                )
+            self.val_dataset = None
             self.train_dataset = Open2D3DSGDataset(
-                relationships_R3SCAN=D3SSG_TRAIN,
+                relationships_R3SCAN=None,
                 relationships_scannet=SCANNET_TRAIN,
                 openseg=self.hparams['clip_model'] == 'OpenSeg',
                 img_dim=img_dim,
@@ -183,31 +149,7 @@ class D3SSGModule(lightning.LightningModule):
                 self.model.load_pretained_cls_model(self.model.relPointNet)
 
         elif stage == 'test':
-            self.rel_mapper = AutoModel.from_pretrained('jinaai/jina-embeddings-v2-base-en', trust_remote_code=True).cuda()
-            if self.hparams.get('test_scans_3rscan'):
-                print('Evaluating on 3RScan test set')
-            self.val_dataset = Open2D3DSGDataset(
-                relationships_R3SCAN=D3SSG_VAL if not self.hparams.get('test_scans_3rscan') else D3SSG_TEST,
-                relationships_scannet=SCANNET_VAL,
-                openseg=self.hparams['clip_model'] == 'OpenSeg',
-                img_dim=img_dim,
-                rel_img_dim=rel_img_dim,
-                top_k_frames=self.hparams['top_k_frames'],
-                scales=self.hparams['scales'],
-                mini=self.hparams['mini_dataset'],
-                load_features=self.hparams.get('load_features', None),
-                blip=self.hparams.get('blip', False),
-                llava=self.hparams.get('llava', False),
-                half=self.hparams.get('quick_eval', False)
-            )
-
-        if not self.hparams.get('dataset') == '3rscan':
-            self.scannet_test_inst2label = {}
-            test_scenes = set(s['scan'] for s in SCANNET_VAL)
-            for scene in os.listdir(os.path.join(CONF.PATH.SCANNET, 'instance2labels')):
-                if scene.split('inst')[0][:-1] in test_scenes:
-                    with open(os.path.join(CONF.PATH.SCANNET, 'instance2labels', scene), 'r') as j:
-                        self.scannet_test_inst2label[scene.split('inst')[0][:-1]] = np.vectorize(json.load(j).get)
+            self.val_dataset = None
 
         if self.hparams['test'] or not self.hparams['load_features']:
             if self.hparams['clip_model'] == "OpenSeg":
