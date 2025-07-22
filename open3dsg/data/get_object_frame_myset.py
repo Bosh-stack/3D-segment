@@ -8,20 +8,55 @@ from scipy.spatial.transform import Rotation as R
 
 
 def load_cam(meta_file: Path):
+    """Load camera intrinsics and extrinsics from a metadata file.
+
+    The custom dataset used for ``myset`` does not enforce a strict format for
+    the camera metadata.  In the original implementation the JSON file was
+    expected to contain ``fx``/``fy``/``cx``/``cy`` together with a quaternion
+    and translation.  If these keys are missing we try to fall back to more
+    generic names in order to support different export tools.
+    """
+
     m = json.loads(meta_file.read_text())
-    fx, fy = m["fx"], m["fy"]
-    cx, cy = m["cx"], m["cy"]
-    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
-    w, h = m["width"], m["height"]
 
-    quat = [m["qw"], m["qx"], m["qy"], m["qz"]]
-    rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
-    trans = np.array([m["tx"], m["ty"], m["tz"]], dtype=np.float32)
+    # --- intrinsics -------------------------------------------------------
+    if all(k in m for k in ("fx", "fy", "cx", "cy")):
+        fx, fy = m["fx"], m["fy"]
+        cx, cy = m["cx"], m["cy"]
+        K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+    elif "K" in m:  # already a 3x3 matrix
+        K = np.array(m["K"], dtype=np.float32).reshape(3, 3)
+    elif "intrinsic" in m:
+        K = np.array(m["intrinsic"], dtype=np.float32).reshape(3, 3)
+    elif "intrinsic_matrix" in m:
+        K = np.array(m["intrinsic_matrix"], dtype=np.float32).reshape(3, 3)
+    else:
+        raise KeyError("Camera intrinsics not found in metadata")
 
-    T = np.eye(4, dtype=np.float32)
-    T[:3, :3] = rot
-    T[:3, 3] = trans
-    return K, T, w, h
+    # image size
+    w = m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
+    h = m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
+    if w is None or h is None:
+        raise KeyError("Image width/height not found in metadata")
+
+    # --- extrinsics -------------------------------------------------------
+    if all(k in m for k in ("qw", "qx", "qy", "qz", "tx", "ty", "tz")):
+        quat = [m["qw"], m["qx"], m["qy"], m["qz"]]
+        rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
+        trans = np.array([m["tx"], m["ty"], m["tz"]], dtype=np.float32)
+        T = np.eye(4, dtype=np.float32)
+        T[:3, :3] = rot
+        T[:3, 3] = trans
+    elif "pose" in m:
+        T = np.array(m["pose"], dtype=np.float32).reshape(4, 4)
+    elif "extrinsic" in m:
+        T = np.array(m["extrinsic"], dtype=np.float32).reshape(4, 4)
+    elif "transform" in m:
+        T = np.array(m["transform"], dtype=np.float32).reshape(4, 4)
+    else:
+        raise KeyError("Camera extrinsics not found in metadata")
+
+    return K, T, int(w), int(h)
 
 
 def project_points(pts_cam, K):
