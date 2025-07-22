@@ -103,6 +103,8 @@ def get_args():
     parser.add_argument('--object_context', action="store_true", help="prompt clip with: A [object] in a scene")
     parser.add_argument('--update_hparams', action="store_true", help="update hparams from checkpoint")
     parser.add_argument('--manual_mapping', action="store_true", help="Manually map some known predicates to GT")
+    parser.add_argument('--train_only', action='store_true',
+                        help='train without running validation/evaluation')
 
     return parser.parse_args()
 
@@ -178,14 +180,20 @@ if __name__ == "__main__":
     print("Args: %s" % args)
     print("HParams: %s" % hparams)
 
-    checkpoint_callback = lightning.callbacks.ModelCheckpoint(
-        save_top_k=5,
-        verbose=True,
-        monitor='val/loss',
-        mode='min',
-        save_last=True,
-        #        every_n_train_steps=10000,
-    )
+    if args.train_only:
+        checkpoint_callback = lightning.callbacks.ModelCheckpoint(
+            save_last=True,
+            every_n_epochs=1,
+            verbose=True,
+        )
+    else:
+        checkpoint_callback = lightning.callbacks.ModelCheckpoint(
+            save_top_k=5,
+            verbose=True,
+            monitor='val/loss',
+            mode='min',
+            save_last=True,
+        )
 
     bnm_clip = 1e-2
 
@@ -200,6 +208,10 @@ if __name__ == "__main__":
             precision = "16-mixed"
 
     hparams['start_time'] = datetime.now()
+    callbacks = [LRLoggingCallback(), checkpoint_callback]
+    if not args.train_only:
+        callbacks.insert(1, EarlyStopping(monitor="val/loss", mode="min", patience=10))
+
     trainer = lightning.Trainer(
         min_epochs=args.epochs,
         max_epochs=args.epochs,
@@ -208,12 +220,7 @@ if __name__ == "__main__":
         strategy=DDPStrategy(find_unused_parameters=True),
         precision=precision,
         sync_batchnorm=True,
-        callbacks=[
-                    LRLoggingCallback(),
-                    EarlyStopping(monitor="val/loss", mode="min", patience=10),
-                    # GPUStatsMonitor(),
-                    checkpoint_callback
-        ],
+        callbacks=callbacks,
         deterministic=False,
         check_val_every_n_epoch=1,
         num_sanity_val_steps=0,
