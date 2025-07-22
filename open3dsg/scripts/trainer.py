@@ -399,12 +399,8 @@ class D3SSGModule(lightning.LightningModule):
                 pred_dict, data_dict['objects_id'].shape[0], query_colors)
 
         if vis:
-            if self.hparams.get('dataset') == '3rscan':
-                dist = data_dict["predicate_min_dist"][0]
-                dist_mask = torch.norm(dist, dim=-1) > 0.5
-            else:
-                dist = data_dict["predicate_dist"][0]
-                dist_mask = torch.norm(dist, dim=-1) > 1.5
+            dist = data_dict["predicate_dist"][0]
+            dist_mask = torch.norm(dist, dim=-1) > 1.5
             dist_mask = dist_mask.cpu()[:data_dict["predicate_count"][0].item()]
 
             predicates = np.array(predicates[0])
@@ -430,154 +426,13 @@ class D3SSGModule(lightning.LightningModule):
             self._vis_clip_graphs(data_dict, object_mostlikely, objects_gt, predicates, predicates_mapped,
                                   object_mostlikely_clip, predicates_clip, predicates_mapped_clip, dump_dir=self.vis_dump_dir)
 
-        eval_dict = {}
-        if self.hparams.get('dataset') == '3rscan':
-            eval_dict['predicates_mapped_probs'] = predicates_mapped_probs
-            eval_dict['predicates_mapped'] = predicates_mapped
-            eval_dict['predicates_blip'] = predicates
-            eval_dict['objects_predict'] = objects_predict
-            eval_dict['objects_probs'] = objects_probs
-            eval_dict['objects_predict_mostlikely'] = object_mostlikely
-            eval_dict['scan_id'] = data_dict['scan_id']
-            eval_dict["objects_id"] = data_dict["objects_id"].cpu()
-            eval_dict["id2name"] = data_dict["id2name"]
-            eval_dict["objects_count"] = data_dict["objects_count"].cpu()
-            eval_dict["objects_cat"] = data_dict["objects_cat"].cpu()
-            eval_dict["predicate_count"] = data_dict["predicate_count"].cpu()
-            eval_dict["predicate_dist"] = data_dict["predicate_dist"].cpu()
-            eval_dict["predicate_min_dist"] = data_dict["predicate_min_dist"].cpu()
-            eval_dict["pairs"] = data_dict["pairs"].cpu()
-            eval_dict["edges"] = data_dict["edges"].cpu()
-            eval_dict["triples"] = data_dict["triples"]
-            eval_dict["predicate_edges"] = data_dict['predicate_edges']
-            eval_dict["relationships"] = (relationships, predicates, predicates_mapped, objects)
-
-            if self.hparams.get('predict_materials'):
-                eval_dict['materials_predict'] = materials_predict
-                eval_dict['materials_probs'] = materials_probs
-                eval_dict['materials_predict_mostlikely'] = materials_mostlikely
-
-        self.test_step_outputs.append(eval_dict)
+        # during training we do not keep evaluation outputs
+        self.test_step_outputs.append({})
         return None
 
     @torch.no_grad()
     def on_test_epoch_end(self,):
-        if not self.hparams.get('dataset') == '3rscan':
-            return
-        outputs = self.test_step_outputs
-        relationship_analysis = {}
-        relationship_analysis['relationships'] = []
-        relationship_analysis['predicates'] = []
-        relationship_analysis['gt'] = []
-        relationship_analysis['top_choice'] = []
-        relationship_analysis['mapped'] = []
-        relationship_analysis['objects'] = []
-
-        test_top1_o, test_top5_o, test_top10_o = [], [], []
-        test_top1_p, test_top3_p, test_top5_p = [], [], []
-        test_top1_rel, test_top10_rel, test_top50_rel, test_top100_rel = [], [], [], []
-
-        test_top1_missed_o, test_top1_hit_o, test_top5_missed_o, test_top5_hit_o, test_top10_missed_o, test_top10_hit_o = [], [], [], [], [], []
-        test_top1_missed_p, test_top1_hit_p, test_top3_missed_p, test_top3_hit_p, test_top5_missed_p, test_top5_hit_p = [], [], [], [], [], []
-
-        eval_func = get_eval
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=8
-        ) as executor:
-            for res in list(tqdm(executor.map(eval_func, outputs), total=len(outputs), desc="Evaluating")):
-                eval_dict = res
-                test_top1_o.extend(eval_dict["top1_recall_o"])
-                test_top5_o.extend(eval_dict["top5_recall_o"])
-                test_top10_o.extend(eval_dict["top10_recall_o"])
-                test_top1_p.extend(eval_dict['top1_recall_p'])
-                test_top3_p.extend(eval_dict['top3_recall_p'])
-                test_top5_p.extend(eval_dict['top5_recall_p'])
-                test_top1_rel.extend(eval_dict['top1_recall_rel'])
-                test_top50_rel.extend(eval_dict['top50_recall_rel'])
-                test_top100_rel.extend(eval_dict['top100_recall_rel'])
-
-                test_top1_hit_o.extend(eval_dict['top_1_hit_objects'])
-                test_top1_missed_o.extend(eval_dict['top_1_missed_objects'])
-                test_top5_hit_o.extend(eval_dict['top_5_hit_objects'])
-                test_top5_missed_o.extend(eval_dict['top_5_missed_objects'])
-                test_top10_hit_o.extend(eval_dict['top_10_hit_objects'])
-                test_top10_missed_o.extend(eval_dict['top_10_missed_objects'])
-
-                test_top1_missed_p.extend(eval_dict['top_1_missed_predicates'])
-                test_top1_hit_p.extend(eval_dict['top_1_hit_predicates'])
-                test_top3_missed_p.extend(eval_dict['top_3_missed_predicates'])
-                test_top3_hit_p.extend(eval_dict['top_3_hit_predicates'])
-                test_top5_missed_p.extend(eval_dict['top_5_missed_predicates'])
-                test_top5_hit_p.extend(eval_dict['top_5_hit_predicates'])
-
-        if self.hparams.get('predict_materials'):
-            topk_attributes = []
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=8
-            ) as executor:
-                for res in list(tqdm(executor.map(eval_attribute, outputs), total=len(outputs), desc="Evaluating")):
-                    eval_dict = res
-                    topk_attributes.extend(eval_dict['topk_graph'])
-
-            topk_attributes_by_class = [[item for sublist in lst for item in sublist] for lst in zip(*topk_attributes)]
-            attribute_classwise_acc1 = [(np.array(topk) <= 1).sum()/len(topk) if len(topk) >
-                                        0 else np.nan for topk in topk_attributes_by_class]
-            attribute_classwise_acc3 = [(np.array(topk) <= 3).sum()/len(topk) if len(topk) >
-                                        0 else np.nan for topk in topk_attributes_by_class]
-            attribute_classwise_acc5 = [(np.array(topk) <= 5).sum()/len(topk) if len(topk) >
-                                        0 else np.nan for topk in topk_attributes_by_class]
-            print('Attributes Acc1', query_materials, attribute_classwise_acc1)
-            print('Attributes Acc3', query_materials, attribute_classwise_acc3)
-            print('Attributes Acc5', query_materials, attribute_classwise_acc5)
-
-        test_top1_mrec_object = self.mRecall_objects(test_top1_hit_o, test_top1_missed_o)
-        test_top5_mrec_object = self.mRecall_objects(test_top5_hit_o, test_top5_missed_o)
-        test_top10_mrec_object = self.mRecall_objects(test_top10_hit_o, test_top10_missed_o)
-
-        test_top1_mrec_predicate = self.mRecall_predicates(test_top1_hit_p, test_top1_missed_p)
-        test_top3_mrec_predicate = self.mRecall_predicates(test_top3_hit_p, test_top3_missed_p)
-        test_top5_mrec_predicate = self.mRecall_predicates(test_top5_hit_p, test_top5_missed_p)
-
-        export = True
-        if export:
-            dump_dir = CONF.PATH.BASE + '/classwise_eval/'+self.hparams['run_name'] + f"_{datetime.now().strftime('%Y-%m-%d-%H-%M')}"
-            os.makedirs(dump_dir, exist_ok=True)
-            json.dump(test_top1_mrec_object, open(os.path.join(dump_dir, f"{'top1_mrec_object'}_eval_percent.json"), "w"))
-            json.dump(test_top5_mrec_object, open(os.path.join(dump_dir, f"{'top5_mrec_object'}_eval_percent.json"), "w"))
-            json.dump(test_top10_mrec_object, open(os.path.join(dump_dir, f"{'top10_mrec_object'}_eval_percent.json"), "w"))
-
-            json.dump(test_top1_mrec_predicate, open(os.path.join(dump_dir, f"{'top1_mrec_predicate'}_eval_percent.json"), "w"))
-            json.dump(test_top3_mrec_predicate, open(os.path.join(dump_dir, f"{'top3_mrec_predicate'}_eval_percent.json"), "w"))
-            json.dump(test_top5_mrec_predicate, open(os.path.join(dump_dir, f"{'top5_mrec_predicate'}_eval_percent.json"), "w"))
-
-        report = REPORT_TEMPLATE_MAIN_EVAL.format(
-            epoch=self.current_epoch,
-            top1_recall_o=round(np.average(test_top1_o), 5),
-            top5_recall_o=round(np.average(test_top5_o), 5),
-            top10_recall_o=round(np.average(test_top10_o), 5),
-            top1_recall_p=round(np.nanmean(test_top1_p), 5),
-            top3_recall_p=round(np.nanmean(test_top3_p), 5),
-            top5_recall_p=round(np.nanmean(test_top5_p), 5),
-            top1_rel=round(np.nanmean(test_top1_rel), 5),
-            top50_rel=round(np.nanmean(test_top50_rel), 5),
-            top100_rel=round(np.nanmean(test_top100_rel), 5),
-
-            m_top1_recall_o=round(np.average(np.nanmean(np.array(list(test_top1_mrec_object.values())))), 5),
-            m_top5_recall_o=round(np.average(np.nanmean(np.array(list(test_top5_mrec_object.values())))), 5),
-            m_top10_recall_o=round(np.average(np.nanmean(np.array(list(test_top10_mrec_object.values())))), 5),
-            m_top1_recall_p=round(np.average(np.nanmean(np.array(list(test_top1_mrec_predicate.values())))), 5),
-            m_top3_recall_p=round(np.average(np.nanmean(np.array(list(test_top3_mrec_predicate.values())))), 5),
-            m_top5_recall_p=round(np.average(np.nanmean(np.array(list(test_top5_mrec_predicate.values())))), 5),
-            m_top50_rel_by_pred=0,
-            m_top100_rel_by_pred=0,
-            m_top50_rel=0,
-            m_top100_rel=0,
-        )
-
-        print(report)
-        with open(dump_dir+'/eval_metrics.txt', "w") as file:
-            file.write(report)
-
+        # evaluation disabled
         self.test_step_outputs.clear()
         return torch.tensor([1])
 
@@ -588,10 +443,7 @@ class D3SSGModule(lightning.LightningModule):
     def _compute_loss(self, data_dict, mat_diff_loss_scale=0.001):
         batch_size = data_dict["objects_id"].size(0)
 
-        if self.hparams.get('dataset') == '3rscan' and self.hparams.get('supervised_edges'):
-            data_dict = self._supervised_dist_loss(batch_size, data_dict)
-        else:
-            data_dict = self._distillation_loss(batch_size, data_dict)
+        data_dict = self._distillation_loss(batch_size, data_dict)
 
         mat_diff_loss = 0
         if not self.hparams.get('pointnet2', False):
@@ -817,20 +669,10 @@ class D3SSGModule(lightning.LightningModule):
 
             edges = data_dict['edges'][bidx][:rel_count]
 
-            if self.hparams.get('gt_objects') and not self.hparams.get('dataset') == '3rscan':
+            if self.hparams.get('gt_objects'):
                 object_edges = data_dict['objects_id'][bidx][:obj_count][edges].cpu().to(torch.long)
-            elif self.hparams.get('gt_objects'):
-                object_edges = objects_gt[bidx][:obj_count][edges].cpu().to(torch.long)
             else:
                 object_edges = obj_predict[bidx][edges.cpu()]
-
-            if self.hparams.get('dataset') == '3rscan':
-                object_edges = np.array(self.obj_class_dict)[object_edges]
-                object_edges[object_edges == 'socket'] = 'wall'
-            else:
-                inst2name = self.scannet_test_inst2label[data_dict['scan_id'][0].split('-')[0]]
-                object_edges = inst2name(object_edges.numpy().astype(str))
-                object_edges[object_edges == None] = 'object'
 
             if from_distill:
                 graph_rel_emb = data_dict['predicates_enc'][bidx][:rel_count]
@@ -889,20 +731,10 @@ class D3SSGModule(lightning.LightningModule):
             clip_rel_emb = data_dict['clip_rel_encoding'][bidx][:rel_count]
 
             edges = data_dict['edges'][bidx][:rel_count]
-            if self.hparams.get('gt_objects') and not self.hparams.get('dataset') == '3rscan':
+            if self.hparams.get('gt_objects'):
                 object_edges = data_dict['objects_id'][bidx][:obj_count][edges].cpu().to(torch.long)
-            elif self.hparams.get('gt_objects'):
-                object_edges = objects_gt[bidx][:obj_count][edges].cpu().to(torch.long)
             else:
                 object_edges = obj_predict[bidx][edges.cpu()]
-
-            if self.hparams.get('dataset') == '3rscan':
-                object_edges = np.array(self.obj_class_dict)[object_edges]
-                object_edges[object_edges == 'socket'] = 'wall'
-            else:
-                inst2name = self.scannet_test_inst2label[data_dict['scan_id'][0].split('-')[0]]
-                object_edges = inst2name(object_edges.numpy().astype(str))
-                object_edges[object_edges == None] = 'object'
 
             if from_distill:
                 graph_rel_emb = data_dict['predicates_enc'][bidx][:rel_count]
