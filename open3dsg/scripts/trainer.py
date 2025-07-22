@@ -115,10 +115,12 @@ class D3SSGModule(lightning.LightningModule):
 
     def setup(self, stage: str):
         def load_scan(base_path, file_path):
-            return json.load(open(os.path.join(base_path, file_path)))["scans"]
+            path = os.path.join(base_path, file_path)
+            if not os.path.exists(path):
+                return []
+            return json.load(open(path))["scans"]
 
         SCANNET_TRAIN = load_scan(CONF.PATH.SCANNET, "subgraphs/relationships_train.json")
-        SCANNET_VAL = load_scan(CONF.PATH.SCANNET, "subgraphs/relationships_validation.json")
 
         img_dim = 336 if self.hparams['clip_model'] == 'ViT-L/14@336px' else 224
         rel_img_dim = img_dim
