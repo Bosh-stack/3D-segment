@@ -26,7 +26,6 @@ from open3dsg.data.open_dataset import Open2D3DSGDataset
 from open3dsg.data.pcl_augmentations import PclAugmenter
 from open3dsg.models.pointnet import feature_transform_reguliarzer
 from open3dsg.models.sgpn import SGPN
-from open3dsg.scripts.eval import get_eval, eval_attribute
 from open3dsg.util.plotting_utils import *
 
 REPORT_TEMPLATE_MAIN_EVAL = """
@@ -105,12 +104,10 @@ class D3SSGModule(lightning.LightningModule):
         self.transform = PclAugmenter(prob=0.25)
 
         self.train_step_outputs = []
-        self.validation_step_outputs = []
         self.test_step_outputs = []
 
         path = CONF.PATH.HOME
         self.clip_path = os.path.join(CONF.PATH.FEATURES, f"clip_features_{datetime.now().strftime('%Y-%m-%d-%H-%M')}")
-        self.val_dataset = None
         self.train_dataset = None
 
     def setup(self, stage: str):
@@ -124,7 +121,6 @@ class D3SSGModule(lightning.LightningModule):
             base_path = CONF.PATH.SCANNET
 
         SCANNET_TRAIN = load_scan(base_path, "subgraphs/relationships_train.json")
-        SCANNET_VAL = load_scan(base_path, "subgraphs/relationships_validation.json")
 
         img_dim = 336 if self.hparams['clip_model'] == 'ViT-L/14@336px' else 224
         rel_img_dim = img_dim
@@ -132,7 +128,6 @@ class D3SSGModule(lightning.LightningModule):
             rel_img_dim = 336 if self.hparams['edge_model'] == 'ViT-L/14@336px' else 224
 
         if stage == 'fit':
-            self.val_dataset = None
             self.train_dataset = Open2D3DSGDataset(
                 relationships_R3SCAN=None,
                 relationships_scannet=SCANNET_TRAIN,
@@ -155,7 +150,7 @@ class D3SSGModule(lightning.LightningModule):
                 self.model.load_pretained_cls_model(self.model.relPointNet)
 
         elif stage == 'test':
-            self.val_dataset = None
+            pass
 
         if self.hparams['test'] or not self.hparams['load_features']:
             if self.hparams['clip_model'] == "OpenSeg":
@@ -211,19 +206,7 @@ class D3SSGModule(lightning.LightningModule):
 
         return train_dataloader
 
-    def val_dataloader(self) -> DataLoader:
-        if self.val_dataset is None:
-            return None
-        val_dataloader = DataLoader(self.val_dataset, batch_size=self.hparams['batch_size'], shuffle=False,
-                                    collate_fn=self.val_dataset.collate_fn, num_workers=self.hparams['workers'], pin_memory=True)
-        return val_dataloader
 
-    def test_dataloader(self) -> DataLoader:
-        if self.val_dataset is None:
-            return None
-        test_dataloader = DataLoader(self.val_dataset, 1, shuffle=False,
-                                     collate_fn=self.val_dataset.collate_fn, num_workers=self.hparams['workers'], pin_memory=True)
-        return test_dataloader
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), self.hparams['lr'], weight_decay=1e-5)
@@ -261,7 +244,7 @@ class D3SSGModule(lightning.LightningModule):
         return {
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
-            "monitor": "val/loss",
+            "monitor": "train/loss",
             "interval": "step"
         }
 
@@ -308,34 +291,7 @@ class D3SSGModule(lightning.LightningModule):
     def on_training_epoch_end(self):
         torch.cuda.empty_cache()
 
-    def on_validation_epoch_start(self) -> None:
-        pass
 
-    @torch.no_grad()
-    def validation_step(self, data_dict, batch_ixd, dataloader_idx=0):
-
-        data_dict = self._forward(data_dict)
-        if self.hparams.get('dump_features'):
-            self._dump_features(data_dict, data_dict["objects_id"].size(0), path=self.clip_path)
-            return
-        data_dict = self._compute_loss(data_dict)
-
-        loss_dict = {
-            "val/loss": data_dict["loss"],
-            "val/obj_loss": data_dict["obj_loss"],
-            "val/rel_loss": data_dict["rel_loss"],
-        }
-
-        for k, v in loss_dict.items():
-            self.log(k, v, on_epoch=True, sync_dist=True, batch_size=1)  # , prog_bar=True if k=="val/loss" else False)
-
-        return (data_dict, loss_dict)
-
-    @torch.no_grad()
-    def on_validation_epoch_end(self,):
-        if self.hparams.get('dump_features'):
-            exit(0)
-        return
 
     def on_test_epoch_start(self) -> None:
         self.model.eval()
@@ -611,14 +567,8 @@ class D3SSGModule(lightning.LightningModule):
             elif self.hparams['llava']:
                 rel_clip_model = "LLaVa"
 
-            if self.val_dataset is not None:
-                obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-')+'_Topk_' + str(self.hparams['top_k_frames'])+'_scales_'+str(
-                    self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.obj_vis_crit)+'_vis_crit_mask_' + str(self.val_dataset.obj_mask_crit))
-                rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-')+'_Topk_' + str(
-                    self.hparams['top_k_frames'])+'_scales_'+str(self.hparams['scales'])+'_vis_crit_' + str(self.val_dataset.rel_vis_crit))
-            else:
-                obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-') )
-                rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-'))
+            obj_path = os.path.join(path, 'export_obj_clip_emb_clip_' + obj_clip_model.replace('/', '-'))
+            rel_path = os.path.join(path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-'))
             obj_valid_path = os.path.join(path, 'export_obj_clip_valids')
             os.makedirs(obj_path, exist_ok=True)
             os.makedirs(obj_valid_path, exist_ok=True)
