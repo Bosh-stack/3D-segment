@@ -113,6 +113,10 @@ def main():
         pairs = []
         edges = []
         triples = []
+        # we use two relation classes: index 0 for 'none' (dummy edges) and 1
+        # for the spatial relationships generated above.  Downstream loaders
+        # expect one-hot encoded rows per edge similar to the 3RScan/ScanNet
+        # preprocessing.
         predicate_cat = []
         predicate_num = []
         predicate_pcl_flag = []
@@ -122,8 +126,11 @@ def main():
         rels2frame = {}
 
         centers = np.array(objects_center)
+        # map relation labels to indices; currently only 'spatial'
+        rel2idx = {"none": 0, "spatial": 1}
+
         for e in g.get("edges", []):
-            s, o, _ = e
+            s, o, rel = e
             if s >= len(objects_pcl) or o >= len(objects_pcl):
                 continue
             if args.max_edges_per_node is not None:
@@ -134,7 +141,10 @@ def main():
             pairs.append([s, o])
             edges.append([s, o])
             triples.append([s, 0, o])
-            predicate_cat.append(0)
+            # one-hot encode relation type
+            pred_vec = np.zeros(len(rel2idx), dtype=int)
+            pred_vec[rel2idx.get(rel, 0)] = 1
+            predicate_cat.append(pred_vec.tolist())
             pcl_s = objects_pcl[s]
             pcl_o = objects_pcl[o]
             flag_s = np.hstack([pcl_s, np.ones((pcl_s.shape[0], 1))])
@@ -171,7 +181,9 @@ def main():
                 pairs.append([idx, idx])
                 edges.append([idx, idx])
                 triples.append([idx, 0, idx])
-                predicate_cat.append(0)
+                none_vec = np.zeros(len(rel2idx), dtype=int)
+                none_vec[rel2idx['none']] = 1
+                predicate_cat.append(none_vec.tolist())
                 predicate_pcl_flag.append(np.zeros((REL_SAMPLE, 7)))
                 predicate_num.append(0)
                 predicate_dist.append([0.0])
