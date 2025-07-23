@@ -172,7 +172,8 @@ def main():
                 edges.append([idx, idx])
                 triples.append([idx, 0, idx])
                 predicate_cat.append(0)
-                predicate_pcl_flag.append(np.zeros((1, 7)))
+                predicate_pcl_flag.append(np.zeros((REL_SAMPLE, 7)))
+                predicate_num.append(0)
                 predicate_dist.append([0.0])
                 predicate_min_dist.append([0.0])
                 rels2frame[(idx, idx)] = []
