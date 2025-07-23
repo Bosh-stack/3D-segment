@@ -52,8 +52,8 @@ def get_args():
                         choices=['message', 'attention', 'transformer', 'mlp'])
     parser.add_argument('--gconv_dim', type=int, default=512, help='embedding dim for point features')
     parser.add_argument('--hidden_dim', type=int, default=1024, help='hidden dim for graph_convs')
-    parser.add_argument('--max_nodes', type=int, default=9, help='max number of nodes in the graph')
-    parser.add_argument('--max_edges', type=int, default=72,
+    parser.add_argument('--max_nodes', type=int, default=100, help='max number of nodes in the graph')
+    parser.add_argument('--max_edges', type=int, default=800,
                         help='max number of edges in the graph. Should correspond to n*(n-1) nodes')
 
     # data params
