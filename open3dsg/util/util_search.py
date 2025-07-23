@@ -51,7 +51,7 @@ def find_neighbors(points, segments, search_method: SAMPLE_METHODS, receptive_fi
         ''' Search neighbor of each segment '''
         for seg_idx in seg_ids:
             bbox_q = bboxes[seg_idx]
-            seg_n = segs_neighbors[int(seg_idx)] = list()
+            seg_n = []
             for seg_tar_idx in seg_ids:
                 if seg_idx == seg_tar_idx:
                     continue
@@ -59,6 +59,7 @@ def find_neighbors(points, segments, search_method: SAMPLE_METHODS, receptive_fi
                 if (bbox_q[0] > bbox_t[1]).sum() + (bbox_t[0] > bbox_q[1]).sum() > 0:
                     continue
                 seg_n.append(int(seg_tar_idx))
+            segs_neighbors[int(seg_idx)] = seg_n[:10]
     elif search_method == SAMPLE_METHODS.RADIUS:
         # search neighbor for each segments
         for seg_id in seg_ids:
@@ -83,5 +84,5 @@ def find_neighbors(points, segments, search_method: SAMPLE_METHODS, receptive_fi
                 return neighbors
             neighbors = list(f_nn(seg_id, trees, bboxes, segs_pts, receptive_field))
             neighbors = [int(n) for n in neighbors]
-            segs_neighbors[int(seg_idx)] = neighbors
+            segs_neighbors[int(seg_id)] = neighbors[:10]
     return segs_neighbors
