@@ -40,10 +40,21 @@ def build_graph_for_scan(scan_dir: Path, inst_dir_name: str = "mask/vis_instance
         diags = [np.linalg.norm(np.array(n["aabb"][1]) - np.array(n["aabb"][0])) for n in nodes]
         mean_diag = float(np.mean(diags)) if diags else 1.0
         thresh = 1.5 * mean_diag
+
+        pairs = []
         for i in range(len(nodes)):
             for j in range(i + 1, len(nodes)):
-                if np.linalg.norm(centers[i] - centers[j]) < thresh:
-                    edges.append([i, j, "spatial"])
+                d = np.linalg.norm(centers[i] - centers[j])
+                if d < thresh:
+                    pairs.append((d, i, j))
+
+        pairs.sort(key=lambda x: x[0])
+        deg = {i: 0 for i in range(len(nodes))}
+        for _, i, j in pairs:
+            if deg[i] < 10 and deg[j] < 10:
+                edges.append([i, j, "spatial"])
+                deg[i] += 1
+                deg[j] += 1
 
     return {"nodes": nodes, "edges": edges}
 
