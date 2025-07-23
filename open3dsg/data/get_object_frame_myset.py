@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
-"""
-Associate each 3D instance (Segment3D .ply) with the TOP-K most visible RGB frames
-for the custom "myset" dataset.
+"""MySet frame association utility.
 
-This version is **robust to different camera-metadata schemas**. It supports:
-- Direct fx/fy/cx/cy keys
-- 3x3 intrinsic matrices under keys: "K", "intrinsic", "intrinsic_matrix"
-- Focal length & pixel size blocks ("focal" / "pixel" / "principal") as in the user's JSON
-- Horizontal/vertical FOV in degrees ("fovx"/"fovy" or nested in "fov")
-- Extrinsics as quaternion+translation (flat or nested), or full 4x4 matrices
+This script associates each 3D instance with the ``top_k`` RGB frames where the
+object is the most visible.  It is modelled after :mod:`get_object_frame.py` but
+supports the more relaxed camera metadata found in the custom *myset* dataset.
 
-Outputs one JSON per scan: mapping instance_id -> [frame_ids]
+The output for every scan is a ``pickle`` file named ``<scan_id>_object2frame.pkl``
+containing a dictionary ``{inst_id: [(frame_id, pixels, ratio, bbox, pixel_ids)]}``.
+Each tuple mimics the structure expected by the legacy preprocessing pipeline so
+that downstream tools (e.g. ``preprocess_3rscan.py``) can operate on the data.
 
-Usage:
+Camera metadata can be provided in various schemas:
+
+* direct ``fx/fy/cx/cy`` keys
+* a 3x3 intrinsic matrix under ``"K"``, ``"intrinsic"`` or ``"intrinsic_matrix"``
+* ``focal``/``pixel``/``principal`` blocks
+* horizontal/vertical field of view values
+* extrinsics either as quaternion+translation or a full 4x4 matrix
+
+Example::
+
     python open3dsg/data/get_object_frame_myset.py \
-        --root  /data/Open3DSG_trainset \
-        --out   open3dsg/output/preprocessed/myset/frames \
+        --root /data/Open3DSG_trainset \
+        --out  open3dsg/output/preprocessed/myset/frames \
         --top_k 5
 """
 
 import argparse
 import json
+import pickle
 from pathlib import Path
 from typing import Tuple
 
@@ -181,6 +189,31 @@ def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarr
     return float(inside.sum()) / float(points_world.shape[0])
 
 
+def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray, w: int, h: int):
+    """Project ``points_world`` into the image and compute visibility stats."""
+    pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
+    pts_cam = (np.linalg.inv(T_world_cam) @ pts_world_h.T).T[:, :3]
+    infront = pts_cam[:, 2] > 0
+    if not np.any(infront):
+        return 0.0, 0, (0, 0, 0, 0), np.zeros((0, 2), dtype=np.uint16)
+
+    uvs, zs = project_points(pts_cam[infront], K)
+    inside = (uvs[:, 0] >= 0) & (uvs[:, 0] < w) & (uvs[:, 1] >= 0) & (uvs[:, 1] < h)
+    if not np.any(inside):
+        return 0.0, 0, (0, 0, 0, 0), np.zeros((0, 2), dtype=np.uint16)
+
+    vis_ratio = float(inside.sum()) / float(points_world.shape[0])
+    uv_vis = uvs[inside]
+    bbox = (
+        int(np.clip(np.floor(uv_vis[:, 0].min()), 0, w - 1)),
+        int(np.clip(np.floor(uv_vis[:, 1].min()), 0, h - 1)),
+        int(np.clip(np.ceil(uv_vis[:, 0].max()), 0, w - 1)),
+        int(np.clip(np.ceil(uv_vis[:, 1].max()), 0, h - 1)),
+    )
+    pixels = np.unique(np.round(uv_vis).astype(np.uint16), axis=0)
+    return vis_ratio, pixels.shape[0], bbox, pixels
+
+
 # -----------------------------
 # Main
 # -----------------------------
@@ -188,7 +221,7 @@ def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarr
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True, help="dataset root")
-    ap.add_argument("--out", required=True, help="output dir for frames json")
+    ap.add_argument("--out", required=True, help="output directory")
     ap.add_argument("--top_k", type=int, default=5)
     args = ap.parse_args()
 
@@ -204,10 +237,11 @@ def main():
         inst_pts = [np.asarray(o3d.io.read_point_cloud(str(p)).points) for p in inst_paths]
 
         img_files = sorted(scan.glob("image_*.*"))
-        frame_scores = {}
+        object2frame = {}
 
         for inst_idx, pts in enumerate(inst_pts):
             scores = []
+            details = {}
             for img_path in img_files:
                 try:
                     idx = int(img_path.stem.split("_")[-1])
@@ -222,12 +256,14 @@ def main():
                 except Exception as e:
                     print(f"[WARN] {scan_id} frame {idx}: {e}")
                     continue
-                score = visible_ratio(pts, K, T, w, h)
-                scores.append((idx, score))
-            top = sorted(scores, key=lambda x: -x[1])[: args.top_k]
-            frame_scores[int(inst_idx)] = [i for i, _ in top]
+                vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, w, h)
+                scores.append((idx, vis))
+                details[idx] = (idx, pix_cnt, vis, bbox, pix_ids)
+            top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
+            object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
 
-        (out_dir / f"{scan_id}.json").write_text(json.dumps(frame_scores))
+        with open(out_dir / f"{scan_id}_object2frame.pkl", "wb") as fw:
+            pickle.dump(object2frame, fw)
         print(f"{scan_id}: {len(inst_paths)} instances processed")
 
 
