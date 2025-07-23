@@ -26,6 +26,18 @@ def main():
     ap.add_argument("--graphs", required=True, help="graphs/train.json")
     ap.add_argument("--frames", required=True, help="directory with *_object2frame.pkl files")
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--max_edges_per_node",
+        type=int,
+        default=8,
+        help="Limit number of outgoing edges per node",
+    )
+    ap.add_argument(
+        "--max_nodes",
+        type=int,
+        default=100,
+        help="Limit number of nodes stored for each scan",
+    )
     args = ap.parse_args()
 
     root = Path(args.root)
@@ -56,7 +68,9 @@ def main():
         objects_scale = []
         objects_id = []
 
-        for node in g["nodes"]:
+        for idx, node in enumerate(g["nodes"]):
+            if idx >= args.max_nodes:
+                break
             inst_file = scan_dir / node["file"]
             pcl = o3d_load(inst_file)
             objects_pcl.append(pcl)
@@ -92,11 +106,19 @@ def main():
         predicate_pcl_flag = []
         predicate_dist = []
         predicate_min_dist = []
+        edge_count = {}
         rels2frame = {}
 
         centers = np.array(objects_center)
         for e in g.get("edges", []):
             s, o, _ = e
+            if s >= len(objects_pcl) or o >= len(objects_pcl):
+                continue
+            if args.max_edges_per_node is not None:
+                c = edge_count.get(s, 0)
+                if c >= args.max_edges_per_node:
+                    continue
+                edge_count[s] = c + 1
             pairs.append([s, o])
             edges.append([s, o])
             triples.append([s, 0, o])
@@ -126,6 +148,21 @@ def main():
                 o_f = map_o[fid]
                 rels.append((fid, s_f[1], o_f[1], s_f[2], o_f[2], s_f[3], o_f[3]))
             rels2frame[(s, o)] = rels
+
+        # pad edges so every node has at least `max_edges_per_node` entries
+        for idx in range(len(objects_pcl)):
+            c = edge_count.get(idx, 0)
+            while c < args.max_edges_per_node:
+                pairs.append([idx, idx])
+                edges.append([idx, idx])
+                triples.append([idx, 0, idx])
+                predicate_cat.append(0)
+                predicate_pcl_flag.append(np.zeros((1, 7)))
+                predicate_dist.append([0.0])
+                predicate_min_dist.append([0.0])
+                rels2frame[(idx, idx)] = []
+                c += 1
+            edge_count[idx] = c
 
         data_dict = {
             "scan_id": scan_id,
