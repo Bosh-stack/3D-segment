@@ -258,7 +258,9 @@ def main():
                     continue
                 vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, w, h)
                 scores.append((idx, vis))
-                details[idx] = (idx, pix_cnt, vis, bbox, pix_ids)
+                # store the frame file name instead of numeric index so the
+                # dataset loader can directly resolve the image path
+                details[idx] = (img_path.name, pix_cnt, vis, bbox, pix_ids)
             top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
             object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
 
