@@ -8,6 +8,11 @@ import open3d as o3d
 import torch
 from tqdm import tqdm
 
+# number of points to store for each object point cloud
+OBJ_SAMPLE = 2000
+# number of points to store for each union of two objects
+REL_SAMPLE = 5000
+
 
 def o3d_load(p: Path):
     pc = o3d.io.read_point_cloud(str(p))
@@ -26,6 +31,18 @@ def main():
     ap.add_argument("--graphs", required=True, help="graphs/train.json")
     ap.add_argument("--frames", required=True, help="directory with *_object2frame.pkl files")
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--max_edges_per_node",
+        type=int,
+        default=8,
+        help="Limit number of outgoing edges per node",
+    )
+    ap.add_argument(
+        "--max_nodes",
+        type=int,
+        default=100,
+        help="Limit number of nodes stored for each scan",
+    )
     args = ap.parse_args()
 
     root = Path(args.root)
@@ -52,14 +69,23 @@ def main():
 
         inst_meta = []
         objects_pcl = []
+        objects_num = []
         objects_center = []
         objects_scale = []
         objects_id = []
 
-        for node in g["nodes"]:
+        for idx, node in enumerate(g["nodes"]):
+            if idx >= args.max_nodes:
+                break
             inst_file = scan_dir / node["file"]
             pcl = o3d_load(inst_file)
-            objects_pcl.append(pcl)
+            if pcl.shape[0] > OBJ_SAMPLE:
+                choice = np.random.choice(pcl.shape[0], OBJ_SAMPLE, replace=False)
+                pcl = pcl[choice]
+            padded = np.zeros((OBJ_SAMPLE, pcl.shape[1]), dtype=pcl.dtype)
+            padded[:pcl.shape[0]] = pcl
+            objects_pcl.append(padded)
+            objects_num.append(min(pcl.shape[0], OBJ_SAMPLE))
             aabb_min = np.array(node["aabb"][0])
             aabb_max = np.array(node["aabb"][1])
             objects_center.append(((aabb_min + aabb_max) / 2).tolist())
@@ -92,11 +118,19 @@ def main():
         predicate_pcl_flag = []
         predicate_dist = []
         predicate_min_dist = []
+        edge_count = {}
         rels2frame = {}
 
         centers = np.array(objects_center)
         for e in g.get("edges", []):
             s, o, _ = e
+            if s >= len(objects_pcl) or o >= len(objects_pcl):
+                continue
+            if args.max_edges_per_node is not None:
+                c = edge_count.get(s, 0)
+                if c >= args.max_edges_per_node:
+                    continue
+                edge_count[s] = c + 1
             pairs.append([s, o])
             edges.append([s, o])
             triples.append([s, 0, o])
@@ -106,9 +140,12 @@ def main():
             flag_s = np.hstack([pcl_s, np.ones((pcl_s.shape[0], 1))])
             flag_o = np.hstack([pcl_o, np.full((pcl_o.shape[0], 1), 2)])
             union = np.concatenate([flag_s, flag_o], axis=0)
-            if union.shape[0] > 5000:
-                choice = np.random.choice(union.shape[0], 5000, replace=False)
+            if union.shape[0] > REL_SAMPLE:
+                choice = np.random.choice(union.shape[0], REL_SAMPLE, replace=False)
                 union = union[choice]
+            if union.shape[0] < REL_SAMPLE:
+                pad = np.zeros((REL_SAMPLE - union.shape[0], union.shape[1]), dtype=union.dtype)
+                union = np.concatenate([union, pad], axis=0)
             predicate_pcl_flag.append(union)
             d = float(np.linalg.norm(centers[s] - centers[o]))
             predicate_dist.append([d])
@@ -127,11 +164,26 @@ def main():
                 rels.append((fid, s_f[1], o_f[1], s_f[2], o_f[2], s_f[3], o_f[3]))
             rels2frame[(s, o)] = rels
 
+        # pad edges so every node has at least `max_edges_per_node` entries
+        for idx in range(len(objects_pcl)):
+            c = edge_count.get(idx, 0)
+            while c < args.max_edges_per_node:
+                pairs.append([idx, idx])
+                edges.append([idx, idx])
+                triples.append([idx, 0, idx])
+                predicate_cat.append(0)
+                predicate_pcl_flag.append(np.zeros((1, 7)))
+                predicate_dist.append([0.0])
+                predicate_min_dist.append([0.0])
+                rels2frame[(idx, idx)] = []
+                c += 1
+            edge_count[idx] = c
+
         data_dict = {
             "scan_id": scan_id,
             "objects_id": objects_id,
             "objects_cat": [0] * len(objects_id),
-            "objects_num": [len(p) for p in objects_pcl],
+            "objects_num": objects_num,
             "objects_pcl": [p.tolist() for p in objects_pcl],
             "objects_pcl_glob": [],
             "objects_center": objects_center,

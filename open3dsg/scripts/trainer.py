@@ -241,12 +241,12 @@ class D3SSGModule(lightning.LightningModule):
                 optimizer, mode='min', factor=0.5, patience=5 if not self.hparams['mini_dataset'] else 10000, threshold=0.0001, threshold_mode='rel',
             )
 
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": lr_scheduler,
+        lr_dict = {
+            "scheduler": lr_scheduler,
             "monitor": "train/loss",
-            "interval": "step"
+            "interval": "step",
         }
+        return {"optimizer": optimizer, "lr_scheduler": lr_dict}
 
     def on_after_batch_transfer(self, data_dict, dataloader_idx):
 
