@@ -8,6 +8,11 @@ import open3d as o3d
 import torch
 from tqdm import tqdm
 
+# number of points to store for each object point cloud
+OBJ_SAMPLE = 2000
+# number of points to store for each union of two objects
+REL_SAMPLE = 5000
+
 
 def o3d_load(p: Path):
     pc = o3d.io.read_point_cloud(str(p))
@@ -64,6 +69,7 @@ def main():
 
         inst_meta = []
         objects_pcl = []
+        objects_num = []
         objects_center = []
         objects_scale = []
         objects_id = []
@@ -73,7 +79,13 @@ def main():
                 break
             inst_file = scan_dir / node["file"]
             pcl = o3d_load(inst_file)
-            objects_pcl.append(pcl)
+            if pcl.shape[0] > OBJ_SAMPLE:
+                choice = np.random.choice(pcl.shape[0], OBJ_SAMPLE, replace=False)
+                pcl = pcl[choice]
+            padded = np.zeros((OBJ_SAMPLE, pcl.shape[1]), dtype=pcl.dtype)
+            padded[:pcl.shape[0]] = pcl
+            objects_pcl.append(padded)
+            objects_num.append(min(pcl.shape[0], OBJ_SAMPLE))
             aabb_min = np.array(node["aabb"][0])
             aabb_max = np.array(node["aabb"][1])
             objects_center.append(((aabb_min + aabb_max) / 2).tolist())
@@ -128,9 +140,12 @@ def main():
             flag_s = np.hstack([pcl_s, np.ones((pcl_s.shape[0], 1))])
             flag_o = np.hstack([pcl_o, np.full((pcl_o.shape[0], 1), 2)])
             union = np.concatenate([flag_s, flag_o], axis=0)
-            if union.shape[0] > 5000:
-                choice = np.random.choice(union.shape[0], 5000, replace=False)
+            if union.shape[0] > REL_SAMPLE:
+                choice = np.random.choice(union.shape[0], REL_SAMPLE, replace=False)
                 union = union[choice]
+            if union.shape[0] < REL_SAMPLE:
+                pad = np.zeros((REL_SAMPLE - union.shape[0], union.shape[1]), dtype=union.dtype)
+                union = np.concatenate([union, pad], axis=0)
             predicate_pcl_flag.append(union)
             d = float(np.linalg.norm(centers[s] - centers[o]))
             predicate_dist.append([d])
@@ -168,7 +183,7 @@ def main():
             "scan_id": scan_id,
             "objects_id": objects_id,
             "objects_cat": [0] * len(objects_id),
-            "objects_num": [len(p) for p in objects_pcl],
+            "objects_num": objects_num,
             "objects_pcl": [p.tolist() for p in objects_pcl],
             "objects_pcl_glob": [],
             "objects_center": objects_center,
