@@ -204,8 +204,6 @@ if __name__ == "__main__":
         sync_batchnorm=True,
         callbacks=callbacks,
         deterministic=False,
-        check_val_every_n_epoch=0,
-        num_sanity_val_steps=0,
         log_every_n_steps=1 if args.mini_dataset else 100,
         accumulate_grad_batches=args.accumulate_grad_batches,
     )
