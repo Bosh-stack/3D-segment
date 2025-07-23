@@ -36,7 +36,13 @@ class MySetDataset(BaseDataset):
             "frames": Path(myset.get("preproc_out", "open3dsg/output/preprocessed/myset")) / "frames",
         }
         graphs_file = self.paths["graphs"] / f"{split}.json"
-        self.graph_db = json.loads(graphs_file.read_text()) if graphs_file.exists() else {}
+        self.graph_db = {}
+        if graphs_file.exists():
+            data = json.loads(graphs_file.read_text())
+            if isinstance(data, dict) and "scans" in data:
+                self.graph_db = {e["scan"]: e.get("graph", {}) for e in data["scans"]}
+            else:
+                self.graph_db = data
         self.scan_ids = sorted(self.graph_db.keys())
 
     def __len__(self) -> int:

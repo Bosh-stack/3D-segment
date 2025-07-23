@@ -28,7 +28,11 @@ def main():
     args = ap.parse_args()
 
     root = Path(args.root)
-    graphs = json.loads(Path(args.graphs).read_text())
+    graphs_raw = json.loads(Path(args.graphs).read_text())
+    if isinstance(graphs_raw, dict) and "scans" in graphs_raw:
+        graphs = {e["scan"]: e.get("graph", {}) for e in graphs_raw["scans"]}
+    else:
+        graphs = graphs_raw
 
     out_cache = Path(args.out) / "cache"
     out_cache.mkdir(parents=True, exist_ok=True)

@@ -58,14 +58,18 @@ def main():
     root = Path(args.root)
     scans = sorted([p for p in root.iterdir() if p.is_dir() and p.name.startswith("scan")])
 
-    graphs = {}
+    graphs = []
     for scan in scans:
         scan_id = scan.name
-        graphs[scan_id] = build_graph_for_scan(scan)
+        graphs.append({
+            "scan": scan_id,
+            "split": 0,
+            "graph": build_graph_for_scan(scan)
+        })
 
     out_dir = Path(args.out) / "graphs"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{args.split}.json").write_text(json.dumps(graphs))
+    (out_dir / f"{args.split}.json").write_text(json.dumps({"scans": graphs}))
     print(f"Wrote {len(graphs)} graphs to {out_dir}")
 
 
