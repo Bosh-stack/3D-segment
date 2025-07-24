@@ -310,15 +310,20 @@ class Open2D3DSGDataset(Dataset):
         obj2frame_mask = {k: top_k for k, v in obj2frame.items()}
         obj2frame_lst = list(obj2frame.values())
         r3scan_bias = 0.5 if dataset == '3rscan' else 1
-        blank_img_dim = (240, 320) if dataset == 'scannet' else (224, 172)
+        # unify raw image resolution across datasets
+        blank_img_dim = (240, 320)
         for i, (k, v) in enumerate(obj2frame.items()):  # range(len(obj2frame)):
             obj = v  # obj2frame_lst[i]
             frames, pixels, vis, bbox, pixel_ids = tuple(np.array(t) for t in zip(*obj))
 
             if dataset == '3rscan':
-                bbox = np.array((172-bbox[:, 1], bbox[:, 0], 172-bbox[:, 3], bbox[:, 2])).T
-                pixel_ids = np.array([np.array([pids[:, 1], 172-pids[:, 0]]).T for pids in pixel_ids])
+                bbox = np.array((172 - bbox[:, 1], bbox[:, 0], 172 - bbox[:, 3], bbox[:, 2])).T
+                pixel_ids = np.array([np.array([pids[:, 1], 172 - pids[:, 0]]).T for pids in pixel_ids])
                 pixel_ids = np.array([pids[(pids[:, 1] < 172) & (pids[:, 0] < 224)] for pids in pixel_ids])
+                scale_y = blank_img_dim[0] / 224
+                scale_x = blank_img_dim[1] / 172
+                pixel_ids = np.array([np.stack((p[:, 0] * scale_y, p[:, 1] * scale_x), axis=1).astype(int)
+                                     for p in pixel_ids])
 
             # filter all where more than 10% of the object is visible
             # self.obj_mask_crit = 0.3
@@ -346,10 +351,12 @@ class Open2D3DSGDataset(Dataset):
             selected = list(zip(vis, frames, pixel_ids))
             # selected = sorted(zip(vis,frames,pixel_ids))[-top_k:]
             if dataset == 'scannet':
-                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1])))for s in selected]
+                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1]))
+                                  .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
             else:
-                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1])
-                                              ).resize((224, 172)).rotate(-90, expand=True)) for s in selected]
+                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1]))
+                                  .rotate(-90, expand=True)
+                                  .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
             pixel_ids_img = [s[2] for s in selected]
 
             if not np.array([((img.shape[0] > 0) & (img.shape[1] > 0)) for img in imgs]).all():
