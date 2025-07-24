@@ -110,6 +110,10 @@ def main():
         else:
             obj2frame = {}
 
+        # keep only keys corresponding to nodes that are actually stored
+        kept_idx = set(range(len(objects_pcl)))
+        obj2frame = {k: v for k, v in obj2frame.items() if k in kept_idx}
+
         pairs = []
         edges = []
         triples = []
