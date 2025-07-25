@@ -211,6 +211,9 @@ class D3SSGModule(lightning.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), self.hparams['lr'], weight_decay=1e-5)
 
+        if self.hparams.get("dump_features"):
+            return optimizer
+
         if self.hparams['lr_scheduler'] == 'cyclic':
             lr_scheduler = torch.optim.lr_scheduler.CyclicLR(
                 optimizer, base_lr=self.hparams['lr']-(self.hparams['lr']/2),
