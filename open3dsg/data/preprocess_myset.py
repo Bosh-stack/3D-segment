@@ -161,9 +161,9 @@ def main():
                 pad = np.zeros((REL_SAMPLE - union.shape[0], union.shape[1]), dtype=union.dtype)
                 union = np.concatenate([union, pad], axis=0)
             predicate_pcl_flag.append(union)
-            d = float(np.linalg.norm(centers[s] - centers[o]))
-            predicate_dist.append([d])
-            predicate_min_dist.append([d])
+            dist_vec = centers[s] - centers[o]
+            predicate_dist.append(dist_vec.tolist())
+            predicate_min_dist.append(dist_vec.tolist())
 
             # rel2frame from shared frames
             sf = obj2frame.get(s, [])
@@ -190,8 +190,8 @@ def main():
                 predicate_cat.append(none_vec.tolist())
                 predicate_pcl_flag.append(np.zeros((REL_SAMPLE, 7)))
                 predicate_num.append(0)
-                predicate_dist.append([0.0])
-                predicate_min_dist.append([0.0])
+                predicate_dist.append([0.0, 0.0, 0.0])
+                predicate_min_dist.append([0.0, 0.0, 0.0])
                 rels2frame[(idx, idx)] = []
                 c += 1
             edge_count[idx] = c
