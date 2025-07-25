@@ -270,8 +270,8 @@ def main():
                 if pix_ids.size:
                     pix_ids = np.stack(
                         (
-                            np.clip(np.round(pix_ids[:, 0] * scale_x), 0, 319),
-                            np.clip(np.round(pix_ids[:, 1] * scale_y), 0, 239),
+                            np.clip(np.round(pix_ids[:, 1] * scale_y), 0, 239),  # row (y)
+                            np.clip(np.round(pix_ids[:, 0] * scale_x), 0, 319),  # column (x)
                         ),
                         axis=1,
                     ).astype(np.uint16)
