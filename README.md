@@ -53,6 +53,8 @@ This is an **optional** step to accelerate the forward pass in the training loop
 python open3dsg/scripts/run.py --dump_features --dataset [scannet/3rscan] --scales 3 --top_k_frames 5 --clip_model OpenSeg --blip
 ```
 
+Running with `--dump_features` only extracts the features without training and disables the learning rate scheduler.
+
 In case of out of memory issues, seperate the BLIP export & the OpenSeg export.
 
 ## Train
