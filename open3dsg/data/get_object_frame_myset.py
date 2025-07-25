@@ -257,6 +257,24 @@ def main():
                     print(f"[WARN] {scan_id} frame {idx}: {e}")
                     continue
                 vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, w, h)
+                # normalize pixel coordinates to 320x240 so downstream loaders
+                # can directly index the resized features
+                scale_x = 320.0 / float(w)
+                scale_y = 240.0 / float(h)
+                bbox = (
+                    int(np.clip(round(bbox[0] * scale_x), 0, 319)),
+                    int(np.clip(round(bbox[1] * scale_y), 0, 239)),
+                    int(np.clip(round(bbox[2] * scale_x), 0, 319)),
+                    int(np.clip(round(bbox[3] * scale_y), 0, 239)),
+                )
+                if pix_ids.size:
+                    pix_ids = np.stack(
+                        (
+                            np.clip(np.round(pix_ids[:, 0] * scale_x), 0, 319),
+                            np.clip(np.round(pix_ids[:, 1] * scale_y), 0, 239),
+                        ),
+                        axis=1,
+                    ).astype(np.uint16)
                 scores.append((idx, vis))
                 # store the frame file name instead of numeric index so the
                 # dataset loader can directly resolve the image path
