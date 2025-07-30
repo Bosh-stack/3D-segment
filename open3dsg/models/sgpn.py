@@ -25,17 +25,18 @@ except:
 from open3dsg.config.config import CONF
 
 
-if torch.cuda.device_count() <= 1:
-    import tensorflow as tf2
-    import tensorflow.compat.v1 as tf
-    gpus = tf.config.experimental.list_physical_devices('GPU')
+import tensorflow as tf2
+import tensorflow.compat.v1 as tf
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
     try:
-        for _, gpu in enumerate(gpus):
-            tf2.config.experimental.set_virtual_device_configuration(
-                gpu, [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=13024)])
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        gpu = gpus[min(local_rank, len(gpus) - 1)]
+        tf.config.experimental.set_visible_devices(gpu, "GPU")
+        tf.config.experimental.set_memory_growth(gpu, True)
     except RuntimeError as e:
         print(e)
-    dummy_text_emb = tf.zeros([1, 1, 768])
+dummy_text_emb = tf.zeros([1, 1, 768])
 
 
 blip2_positional_encoding = torch.load(os.path.join(CONF.PATH.CHECKPOINTS, 'blip2_positional_embedding.pt'))
