@@ -30,6 +30,7 @@ For the 2D-3D distillation training, we have to align the 2D frames to the 3D po
 
 ```bash
 python open3dsg/data/get_object_frame.py --mode [train/test] --dataset [R3SCAN/SCANNET]
+python -m open3dsg.data.merge_instance_masks --scan <scan_id> --dataset <R3SCAN/SCANNET> --masks_dir <path_to_2d_masks>
 ```
 
 We pre-process the data before the training for faster data processing in the training loop.
