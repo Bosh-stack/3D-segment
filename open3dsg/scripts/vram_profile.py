@@ -10,9 +10,6 @@ from open3dsg.data.open_dataset import Open2D3DSGDataset
 from open3dsg.config.config import CONF
 
 
-results = []
-
-
 def get_vram():
     """Return total and per GPU memory usage in MB."""
     torch.cuda.synchronize()
@@ -24,9 +21,9 @@ def get_vram():
     return total, per_gpu
 
 
-def record_vram(tag: str):
+def record_vram(tag: str, results_list):
     total, per_gpu = get_vram()
-    results.append((tag, total, per_gpu))
+    results_list.append((tag, total, per_gpu))
     per_gpu_str = ", ".join(
         f"gpu{idx}: {mem:.2f} MB" for idx, mem in enumerate(per_gpu)
     )
@@ -36,9 +33,9 @@ def record_vram(tag: str):
         print(f"{tag}: {total:.2f} MB")
 
 
-def print_summary():
-    print("\n---- VRAM Usage Summary ----")
-    for tag, total, per_gpu in results:
+def print_summary(results_list, header="VRAM Usage Summary"):
+    print(f"\n---- {header} ----")
+    for tag, total, per_gpu in results_list:
         per_gpu_str = ", ".join(
             f"gpu{idx}: {mem:.2f} MB" for idx, mem in enumerate(per_gpu)
         )
@@ -54,6 +51,94 @@ def load_relationships(dataset: str):
     else:
         path = os.path.join(CONF.PATH.SCANNET, "subgraphs", "relationships_train.json")
     return json.load(open(path, "r"))["scans"]
+
+
+def profile_gpu(device_id: int, args, hparams):
+    device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
+    results = []
+
+    model = SGPN(hparams).to(device)
+
+    record_vram("Base model", results)
+
+    target_model = model
+    if not args.clean_pointnet and not target_model.rgb and not target_model.nrm:
+        target_model.load_pretained_cls_model(target_model.objPointNet)
+        target_model.load_pretained_cls_model(target_model.relPointNet)
+        record_vram("PointNet weights", results)
+
+    if not args.load_features:
+        if args.clip_model == "OpenSeg":
+            target_model.OPENSEG = target_model.load_pretrained_clip_model(target_model.OPENSEG, args.clip_model)
+        else:
+            target_model.CLIP = target_model.load_pretrained_clip_model(target_model.CLIP, args.clip_model)
+        record_vram(f"CLIP ({args.clip_model})", results)
+
+        if args.node_model:
+            target_model.CLIP_NODE = target_model.load_pretrained_clip_model(target_model.CLIP_NODE, args.node_model)
+            record_vram(f"Node model ({args.node_model})", results)
+
+        if args.edge_model:
+            target_model.CLIP_EDGE = target_model.load_pretrained_clip_model(target_model.CLIP_EDGE, args.edge_model)
+            record_vram(f"Edge model ({args.edge_model})", results)
+
+        if args.blip:
+            if args.dump_features:
+                target_model.load_pretrained_blipvision_model()
+            else:
+                target_model.load_pretrained_blip_model()
+            record_vram("BLIP model", results)
+
+        if args.llava:
+            target_model.load_pretrained_llava_model()
+            record_vram("LLaVA model", results)
+
+    scans = load_relationships(args.dataset)
+    dataset = Open2D3DSGDataset(
+        relationships_R3SCAN=None,
+        relationships_scannet=scans,
+        openseg=args.clip_model == "OpenSeg",
+        img_dim=336 if args.clip_model == "ViT-L/14@336px" else 224,
+        rel_img_dim=336 if (args.edge_model == "ViT-L/14@336px") else None,
+        top_k_frames=args.top_k_frames,
+        scales=args.scales,
+        max_objects=args.max_nodes,
+        max_rels=args.max_edges,
+        load_features=args.load_features,
+        blip=args.blip,
+        llava=args.llava,
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=dataset.collate_fn,
+    )
+    batch = next(iter(loader))
+    batch_gpu = {k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v for k, v in batch.items()}
+    torch.cuda.synchronize()
+    record_vram("First batch moved to GPU", results)
+
+    with torch.no_grad():
+        if args.dump_features:
+            if args.clip_model == "OpenSeg":
+                _ = model.clip_encode_pixels(
+                    batch_gpu["object_raw_imgs"],
+                    batch_gpu["object_pixels"],
+                    batch_gpu["objects_count"],
+                    batch_gpu["relationship_imgs"],
+                )
+            else:
+                _ = model.clip_encode_imgs(batch_gpu["object_imgs"], batch_gpu["relationship_imgs"])
+            if args.blip:
+                _ = model.blip_encode_images(batch_gpu["blip_images"])
+            elif args.llava:
+                _ = model.llava_encode_images(batch_gpu["blip_images"])
+        else:
+            _ = model(batch_gpu)
+    record_vram("After inference", results)
+
+    return results
 
 
 def main():
@@ -133,109 +218,10 @@ def main():
     else:
         device_ids = list(range(min(args.gpus, torch.cuda.device_count())))
 
-    device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
-    model = SGPN(hparams).to(device)
-    if len(device_ids) > 1:
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
-    record_vram("Base model")
-
-    target_model = model.module if isinstance(model, torch.nn.DataParallel) else model
-
-    if not args.clean_pointnet and not target_model.rgb and not target_model.nrm:
-        target_model.load_pretained_cls_model(target_model.objPointNet)
-        target_model.load_pretained_cls_model(target_model.relPointNet)
-        record_vram("PointNet weights")
-
-    if not args.load_features:
-        if args.clip_model == "OpenSeg":
-            target_model.OPENSEG = target_model.load_pretrained_clip_model(
-                target_model.OPENSEG, args.clip_model
-            )
-        else:
-            target_model.CLIP = target_model.load_pretrained_clip_model(
-                target_model.CLIP, args.clip_model
-            )
-        record_vram(f"CLIP ({args.clip_model})")
-
-        if args.node_model:
-            target_model.CLIP_NODE = target_model.load_pretrained_clip_model(
-                target_model.CLIP_NODE, args.node_model
-            )
-            record_vram(f"Node model ({args.node_model})")
-
-        if args.edge_model:
-            target_model.CLIP_EDGE = target_model.load_pretrained_clip_model(
-                target_model.CLIP_EDGE, args.edge_model
-            )
-            record_vram(f"Edge model ({args.edge_model})")
-
-        if args.blip:
-            if args.dump_features:
-                target_model.load_pretrained_blipvision_model()
-            else:
-                target_model.load_pretrained_blip_model()
-            record_vram("BLIP model")
-
-        if args.llava:
-            target_model.load_pretrained_llava_model()
-            record_vram("LLaVA model")
-
-    # Load a small batch of data to measure VRAM
-    try:
-        scans = load_relationships(args.dataset)
-        dataset = Open2D3DSGDataset(
-            relationships_R3SCAN=None,
-            relationships_scannet=scans,
-            openseg=args.clip_model == "OpenSeg",
-            img_dim=336 if args.clip_model == "ViT-L/14@336px" else 224,
-            rel_img_dim=336 if (args.edge_model == "ViT-L/14@336px") else None,
-            top_k_frames=args.top_k_frames,
-            scales=args.scales,
-            max_objects=args.max_nodes,
-            max_rels=args.max_edges,
-            load_features=args.load_features,
-            blip=args.blip,
-            llava=args.llava,
-        )
-        loader = DataLoader(
-            dataset,
-            batch_size=max(1, len(device_ids)),
-            shuffle=False,
-            collate_fn=dataset.collate_fn,
-        )
-        batch = next(iter(loader))
-        batch_gpu = {
-            k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v
-            for k, v in batch.items()
-        }
-        torch.cuda.synchronize()
-        record_vram("First batch moved to GPU")
-
-        # run a single forward pass to account for inference memory
-        with torch.no_grad():
-            if args.dump_features:
-                if args.clip_model == "OpenSeg":
-                    _ = model.clip_encode_pixels(
-                        batch_gpu["object_raw_imgs"],
-                        batch_gpu["object_pixels"],
-                        batch_gpu["objects_count"],
-                        batch_gpu["relationship_imgs"],
-                    )
-                else:
-                    _ = model.clip_encode_imgs(
-                        batch_gpu["object_imgs"], batch_gpu["relationship_imgs"]
-                    )
-                if args.blip:
-                    _ = model.blip_encode_images(batch_gpu["blip_images"])
-                elif args.llava:
-                    _ = model.llava_encode_images(batch_gpu["blip_images"])
-            else:
-                _ = model(batch_gpu)
-        record_vram("After inference")
-    except Exception as e:
-        print(f"Could not load dataset or move batch to GPU: {e}")
-    finally:
-        print_summary()
+    for dev in device_ids:
+        print(f"\nProfiling on GPU {dev}")
+        results = profile_gpu(dev, args, hparams)
+        print_summary(results, header=f"GPU {dev} VRAM Usage")
 
 
 if __name__ == "__main__":
