@@ -139,43 +139,45 @@ def main():
         model = torch.nn.DataParallel(model, device_ids=device_ids)
     record_vram("Base model")
 
-    if not args.clean_pointnet and not model.rgb and not model.nrm:
-        model.load_pretained_cls_model(model.objPointNet)
-        model.load_pretained_cls_model(model.relPointNet)
+    target_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+
+    if not args.clean_pointnet and not target_model.rgb and not target_model.nrm:
+        target_model.load_pretained_cls_model(target_model.objPointNet)
+        target_model.load_pretained_cls_model(target_model.relPointNet)
         record_vram("PointNet weights")
 
     if not args.load_features:
         if args.clip_model == "OpenSeg":
-            model.OPENSEG = model.load_pretrained_clip_model(
-                model.OPENSEG, args.clip_model
+            target_model.OPENSEG = target_model.load_pretrained_clip_model(
+                target_model.OPENSEG, args.clip_model
             )
         else:
-            model.CLIP = model.load_pretrained_clip_model(
-                model.CLIP, args.clip_model
+            target_model.CLIP = target_model.load_pretrained_clip_model(
+                target_model.CLIP, args.clip_model
             )
         record_vram(f"CLIP ({args.clip_model})")
 
         if args.node_model:
-            model.CLIP_NODE = model.load_pretrained_clip_model(
-                model.CLIP_NODE, args.node_model
+            target_model.CLIP_NODE = target_model.load_pretrained_clip_model(
+                target_model.CLIP_NODE, args.node_model
             )
             record_vram(f"Node model ({args.node_model})")
 
         if args.edge_model:
-            model.CLIP_EDGE = model.load_pretrained_clip_model(
-                model.CLIP_EDGE, args.edge_model
+            target_model.CLIP_EDGE = target_model.load_pretrained_clip_model(
+                target_model.CLIP_EDGE, args.edge_model
             )
             record_vram(f"Edge model ({args.edge_model})")
 
         if args.blip:
             if args.dump_features:
-                model.load_pretrained_blipvision_model()
+                target_model.load_pretrained_blipvision_model()
             else:
-                model.load_pretrained_blip_model()
+                target_model.load_pretrained_blip_model()
             record_vram("BLIP model")
 
         if args.llava:
-            model.load_pretrained_llava_model()
+            target_model.load_pretrained_llava_model()
             record_vram("LLaVA model")
 
     # Load a small batch of data to measure VRAM
