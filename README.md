@@ -66,6 +66,10 @@ To inspect GPU memory usage of each pretrained component run:
 python open3dsg/scripts/vram_profile.py --dataset scannet --clip_model OpenSeg --blip
 ```
 
+The profiler also supports `--dump_features` to measure memory
+consumption during 2D feature precomputing and `--load_features` to
+profile training when precomputed features are loaded from disk.
+
 
 ## Train
 
