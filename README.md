@@ -58,6 +58,15 @@ Running with `--dump_features` only extracts the features without training and d
 
 In case of out of memory issues, seperate the BLIP export & the OpenSeg export.
 
+## Profile GPU Memory
+
+To inspect GPU memory usage of each pretrained component run:
+
+```bash
+python open3dsg/scripts/vram_profile.py --dataset scannet --clip_model OpenSeg --blip
+```
+
+
 ## Train
 
 To train Open3DSG on ScanNet you can use:
