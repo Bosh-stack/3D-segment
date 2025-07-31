@@ -72,6 +72,12 @@ def main():
     parser.add_argument("--edge_model", default=None)
     parser.add_argument("--blip", action="store_true")
     parser.add_argument("--llava", action="store_true")
+    parser.add_argument('--avg_blip_emb', action='store_true',
+                        help='Average the blip embeddings across patches')
+    parser.add_argument('--blip_proj_layers', type=int, default=3,
+                        help='Number of projection layers to match blip embedding')
+    parser.add_argument('--avg_llava_emb', action='store_true',
+                        help='Average the llava embeddings across patches')
     parser.add_argument(
         "--dump_features",
         action="store_true",
@@ -98,6 +104,9 @@ def main():
         "edge_model": args.edge_model,
         "blip": args.blip,
         "llava": args.llava,
+        "avg_blip_emb": args.avg_blip_emb,
+        "blip_proj_layers": args.blip_proj_layers,
+        "avg_llava_emb": args.avg_llava_emb,
         "pointnet2": args.pointnet2,
         "clean_pointnet": args.clean_pointnet,
         "max_nodes": args.max_nodes,
