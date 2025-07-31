@@ -125,7 +125,14 @@ def main():
         record_vram("PointNet weights")
 
     if not args.load_features:
-        model.CLIP = model.load_pretrained_clip_model(model.CLIP, args.clip_model)
+        if args.clip_model == "OpenSeg":
+            model.OPENSEG = model.load_pretrained_clip_model(
+                model.OPENSEG, args.clip_model
+            )
+        else:
+            model.CLIP = model.load_pretrained_clip_model(
+                model.CLIP, args.clip_model
+            )
         record_vram(f"CLIP ({args.clip_model})")
 
         if args.node_model:
