@@ -10,10 +10,38 @@ from open3dsg.data.open_dataset import Open2D3DSGDataset
 from open3dsg.config.config import CONF
 
 
-def print_vram(tag: str):
+results = []
+
+
+def get_vram():
+    """Return total and per GPU memory usage in MB."""
     torch.cuda.synchronize()
-    mem = torch.cuda.memory_allocated() / 1024 ** 2
-    print(f"{tag}: {mem:.2f} MB")
+    per_gpu = [torch.cuda.memory_allocated(i) / 1024 ** 2
+               for i in range(torch.cuda.device_count())]
+    total = sum(per_gpu)
+    return total, per_gpu
+
+
+def record_vram(tag: str):
+    total, per_gpu = get_vram()
+    results.append((tag, total, per_gpu))
+    per_gpu_str = ", ".join(
+        f"gpu{idx}: {mem:.2f} MB" for idx, mem in enumerate(per_gpu))
+    if len(per_gpu) > 1:
+        print(f"{tag}: {total:.2f} MB ({per_gpu_str})")
+    else:
+        print(f"{tag}: {total:.2f} MB")
+
+
+def print_summary():
+    print("\n---- VRAM Usage Summary ----")
+    for tag, total, per_gpu in results:
+        per_gpu_str = ", ".join(
+            f"gpu{idx}: {mem:.2f} MB" for idx, mem in enumerate(per_gpu))
+        if len(per_gpu) > 1:
+            print(f"{tag}: {total:.2f} MB ({per_gpu_str})")
+        else:
+            print(f"{tag}: {total:.2f} MB")
 
 
 def load_relationships(dataset: str):
@@ -60,31 +88,31 @@ def main():
     }
 
     model = SGPN(hparams).cuda()
-    print_vram("Base model")
+    record_vram("Base model")
 
     if not args.clean_pointnet and not model.rgb and not model.nrm:
         model.load_pretained_cls_model(model.objPointNet)
         model.load_pretained_cls_model(model.relPointNet)
-        print_vram("PointNet weights")
+        record_vram("PointNet weights")
 
     model.CLIP = model.load_pretrained_clip_model(model.CLIP, args.clip_model)
-    print_vram(f"CLIP ({args.clip_model})")
+    record_vram(f"CLIP ({args.clip_model})")
 
     if args.node_model:
         model.CLIP_NODE = model.load_pretrained_clip_model(model.CLIP_NODE, args.node_model)
-        print_vram(f"Node model ({args.node_model})")
+        record_vram(f"Node model ({args.node_model})")
 
     if args.edge_model:
         model.CLIP_EDGE = model.load_pretrained_clip_model(model.CLIP_EDGE, args.edge_model)
-        print_vram(f"Edge model ({args.edge_model})")
+        record_vram(f"Edge model ({args.edge_model})")
 
     if args.blip:
         model.load_pretrained_blip_model()
-        print_vram("BLIP model")
+        record_vram("BLIP model")
 
     if args.llava:
         model.load_pretrained_llava_model()
-        print_vram("LLaVA model")
+        record_vram("LLaVA model")
 
     # Load a small batch of data to measure VRAM
     try:
@@ -104,9 +132,16 @@ def main():
         batch = next(iter(loader))
         batch_gpu = {k: v.cuda(non_blocking=True) if torch.is_tensor(v) else v for k, v in batch.items()}
         torch.cuda.synchronize()
-        print_vram("First batch moved to GPU")
+        record_vram("First batch moved to GPU")
+
+        # run a single forward pass to account for inference memory
+        with torch.no_grad():
+            _ = model(batch_gpu)
+        record_vram("After inference")
     except Exception as e:
         print(f"Could not load dataset or move batch to GPU: {e}")
+    finally:
+        print_summary()
 
 
 if __name__ == "__main__":
