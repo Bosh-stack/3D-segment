@@ -92,6 +92,18 @@ def main():
     parser.add_argument("--scales", type=int, default=3)
     parser.add_argument("--max_nodes", type=int, default=10)
     parser.add_argument("--max_edges", type=int, default=100)
+    parser.add_argument(
+        "--gpus",
+        type=int,
+        default=1,
+        help="number of GPUs to use (DataParallel)",
+    )
+    parser.add_argument(
+        "--gpu_ids",
+        type=str,
+        default=None,
+        help="comma separated list of GPU ids (overrides --gpus)",
+    )
     args = parser.parse_args()
 
     hparams = {
@@ -116,7 +128,15 @@ def main():
         "test": False,
     }
 
-    model = SGPN(hparams).cuda()
+    if args.gpu_ids:
+        device_ids = [int(x) for x in args.gpu_ids.split(',')]
+    else:
+        device_ids = list(range(min(args.gpus, torch.cuda.device_count())))
+
+    device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
+    model = SGPN(hparams).to(device)
+    if len(device_ids) > 1:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
     record_vram("Base model")
 
     if not args.clean_pointnet and not model.rgb and not model.nrm:
@@ -176,11 +196,14 @@ def main():
             llava=args.llava,
         )
         loader = DataLoader(
-            dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn
+            dataset,
+            batch_size=max(1, len(device_ids)),
+            shuffle=False,
+            collate_fn=dataset.collate_fn,
         )
         batch = next(iter(loader))
         batch_gpu = {
-            k: v.cuda(non_blocking=True) if torch.is_tensor(v) else v
+            k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v
             for k, v in batch.items()
         }
         torch.cuda.synchronize()
