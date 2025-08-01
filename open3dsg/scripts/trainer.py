@@ -141,7 +141,8 @@ class D3SSGModule(lightning.LightningModule):
                 blip=self.hparams.get('blip', False),
                 llava=self.hparams.get('llava', False),
                 max_objects=self.hparams.get('max_nodes', None),
-                max_rels=self.hparams.get('max_edges', None)
+                max_rels=self.hparams.get('max_edges', None),
+                skip_edge_features=self.hparams.get('skip_edge_features', False)
             )
 
             # load pre-trained models
@@ -575,11 +576,13 @@ class D3SSGModule(lightning.LightningModule):
             obj_valid_path = os.path.join(path, 'export_obj_clip_valids')
             os.makedirs(obj_path, exist_ok=True)
             os.makedirs(obj_valid_path, exist_ok=True)
-            os.makedirs(rel_path, exist_ok=True)
+            if clip_rel_emb_masked is not None:
+                os.makedirs(rel_path, exist_ok=True)
 
             torch.save(clip_obj_emb.detach().cpu(), os.path.join(obj_path, data_dict['scan_id'][bidx]+'.pt'))
             torch.save(obj_valids.detach().cpu(), os.path.join(obj_valid_path, data_dict['scan_id'][bidx]+'.pt'))
-            torch.save(clip_rel_emb_masked.detach().cpu(), os.path.join(rel_path, data_dict['scan_id'][bidx]+'.pt'))
+            if clip_rel_emb_masked is not None:
+                torch.save(clip_rel_emb_masked.detach().cpu(), os.path.join(rel_path, data_dict['scan_id'][bidx]+'.pt'))
 
     @torch.no_grad()
     def _predict_obj_from_clip(self, data_dict, batch_size, query_classes=None, from_distill=True):

@@ -56,7 +56,9 @@ python open3dsg/scripts/run.py --dump_features --dataset [scannet/3rscan] --scal
 
 Running with `--dump_features` only extracts the features without training and disables the learning rate scheduler.
 
-In case of out of memory issues, seperate the BLIP export & the OpenSeg export.
+In case of out of memory issues, use `--skip_edge_features` to export only the node
+features first. Afterwards run the command again with `--blip` to dump relation
+embeddings.
 
 ## Profile GPU Memory
 

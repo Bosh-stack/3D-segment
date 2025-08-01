@@ -413,7 +413,7 @@ class SGPN(nn.Module):
                 obj_clip_encoding = self.CLIP.encode_image(obj_imgs_batched).view(*obj_imgs.shape[:-3], -1)
             obj_clip_encoding = obj_clip_encoding/obj_clip_encoding.norm(dim=-1, keepdim=True)
 
-            if not self.hparams.get('blip') or not self.hparams.get('llava'):
+            if not self.hparams.get('skip_edge_features') and self.CLIP is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
                 rel_img_dim = rel_imgs.shape[-2:]
                 rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
                 if self.hparams['edge_model']:
@@ -452,7 +452,7 @@ class SGPN(nn.Module):
                     pts = obj_points[batch][node][view]
                     obj_embedding[batch][node][view] = feat_2d[pts[:, 0], pts[:, 1]].mean(axis=0)
 
-        if not self.hparams.get('blip') and not self.hparams.get('llava'):
+        if not self.hparams.get('skip_edge_features') and self.CLIP is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
             rel_img_dim = rel_imgs.shape[-2:]
             with torch.no_grad():
                 rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
