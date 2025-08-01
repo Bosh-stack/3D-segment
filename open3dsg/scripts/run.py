@@ -66,6 +66,8 @@ def get_args():
     parser.add_argument("--scales", type=int, default=3, help="number of scales for each selected image")
     parser.add_argument('--dump_features', action="store_true", help="precompute 2d features and dump to disk")
     parser.add_argument('--load_features', default=None, help="path to precomputed 2d features")
+    parser.add_argument('--skip_edge_features', action='store_true',
+                        help='Skip relation image feature computation')
 
     # model variations params
     parser.add_argument('--clip_model', default="OpenSeg", type=str,

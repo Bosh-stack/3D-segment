@@ -193,7 +193,8 @@ class Open2D3DSGDataset(Dataset):
                  load_features=None,
                  blip=False,
                  llava=False,
-                 half=False
+                 half=False,
+                 skip_edge_features=False
                  ):
         self.img_dim = img_dim
         self.rel_img_dim = rel_img_dim if rel_img_dim else img_dim
@@ -205,6 +206,7 @@ class Open2D3DSGDataset(Dataset):
         self.load_features = load_features
         self.blip = blip
         self.llava = llava
+        self.skip_edge_features = skip_edge_features
         self.max_objs = max_objects
         self.max_rels = max_rels
 
@@ -546,7 +548,15 @@ class Open2D3DSGDataset(Dataset):
 
             data_dict['object_pixels'] = obj_frame_pixels
 
-        if self.blip or self.llava:
+        if self.skip_edge_features:
+            data_dict['rel2frame_mask'] = np.zeros(self.max_rels)
+            data_dict['relationship_imgs'] = torch.zeros((self.max_rels, self.top_k_frames*self.scales, 3, self.rel_img_dim, self.rel_img_dim))
+            if self.blip or self.llava:
+                blank_img_dim = (320, 240) if data_dict['dataset'] == 'scannet' else (224, 172)
+                black_image = Image.new('RGB', blank_img_dim, (0, 0, 0))
+                data_dict['blip_images'] = [[black_image]*self.top_k_frames*self.scales for _ in range(self.max_rels)]
+                data_dict['blip_mask'] = {k: 0 for k in data_dict['rel2frame'].keys()}
+        elif self.blip or self.llava:
             rel_imgs, rel2frame_mask = self.blip_rel_frames(
                 data_dict["rel2frame"], data_dict['rel2frame_mask'], data_dict["scene_id"], data_dict['dataset'], top_k=self.top_k_frames, scales=self.scales)
             blank_img_dim = (320, 240) if data_dict['dataset'] == 'scannet' else (224, 172)
@@ -579,31 +589,39 @@ class Open2D3DSGDataset(Dataset):
     def load_features_disk(self, data_dict):
         scan_id = data_dict['scan_id']
         obj_valid_rel_path = sorted(os.listdir(self.load_features))
-        assert len(obj_valid_rel_path) == 3
+        obj_dir = [d for d in obj_valid_rel_path if 'export_obj_clip_emb' in d][0]
+        valid_dir = [d for d in obj_valid_rel_path if 'export_obj_clip_valids' in d][0]
+        rel_dirs = [d for d in obj_valid_rel_path if 'export_rel_clip_emb' in d]
 
         torch_numpy = '.pt'
-        obj_feature_pth = os.path.join(self.load_features, obj_valid_rel_path[0], scan_id+torch_numpy)
-        obj_valid_feature_pth = os.path.join(self.load_features, obj_valid_rel_path[1], scan_id+torch_numpy)
-        rel_feature_pth = os.path.join(self.load_features, obj_valid_rel_path[2], scan_id+torch_numpy)
+        obj_feature_pth = os.path.join(self.load_features, obj_dir, scan_id+torch_numpy)
+        obj_valid_feature_pth = os.path.join(self.load_features, valid_dir, scan_id+torch_numpy)
+        rel_feature_pth = os.path.join(self.load_features, rel_dirs[0], scan_id+torch_numpy) if rel_dirs else None
 
         if torch_numpy == '.npy':
             obj_features = torch.from_numpy(np.load(obj_feature_pth))
             obj_valid_features = torch.from_numpy(np.load(obj_valid_feature_pth))
-            rel_features = torch.from_numpy(np.load(rel_feature_pth))
+            rel_features = torch.from_numpy(np.load(rel_feature_pth)) if rel_feature_pth else None
         else:
             obj_features = torch.load(obj_feature_pth)
             obj_valid_features = torch.load(obj_valid_feature_pth)
-            rel_features = torch.load(rel_feature_pth)
+            rel_features = torch.load(rel_feature_pth) if rel_feature_pth else None
 
         data_dict["clip_obj_encoding"] = torch.zeros((self.max_objs, obj_features.shape[-1]))
         data_dict["clip_obj_encoding"][:len(obj_features)] = obj_features
         data_dict["clip_obj_valids"] = torch.zeros((self.max_objs), dtype=torch.bool)
         data_dict["clip_obj_valids"][:len(obj_valid_features)] = obj_valid_features
-        if self.blip or self.llava:
-            data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, *rel_features.shape[-2:]), dtype=rel_features.dtype)
+        if rel_features is not None:
+            if self.blip or self.llava:
+                data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, *rel_features.shape[-2:]), dtype=rel_features.dtype)
+            else:
+                data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, rel_features.shape[-1]))
+            data_dict["clip_rel_encoding"][:len(rel_features)] = rel_features
         else:
-            data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, rel_features.shape[-1]))
-        data_dict["clip_rel_encoding"][:len(rel_features)] = rel_features
+            if self.blip or self.llava:
+                data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, self.top_k_frames*self.scales, 0))
+            else:
+                data_dict['clip_rel_encoding'] = torch.zeros((self.max_rels, 0))
         return data_dict
 
     def __getitem__(self, idx):

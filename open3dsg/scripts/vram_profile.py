@@ -107,6 +107,7 @@ def profile_gpu(device_id: int, args, hparams):
         load_features=args.load_features,
         blip=args.blip,
         llava=args.llava,
+        skip_edge_features=args.skip_edge_features,
     )
     loader = DataLoader(
         dataset,
@@ -174,6 +175,10 @@ def main():
     parser.add_argument(
         "--load_features", default=None, help="path to precomputed 2D features"
     )
+    parser.add_argument(
+        "--skip_edge_features", action="store_true",
+        help="Skip relation image feature computation",
+    )
     parser.add_argument("--pointnet2", action="store_true")
     parser.add_argument("--clean_pointnet", action="store_true")
     parser.add_argument("--top_k_frames", type=int, default=5)
@@ -213,6 +218,7 @@ def main():
         "max_edges": args.max_edges,
         "load_features": args.load_features,
         "dump_features": args.dump_features,
+        "skip_edge_features": args.skip_edge_features,
         "test": False,
     }
 
