@@ -60,6 +60,20 @@ In case of out of memory issues, use `--skip_edge_features` to export only the n
 features first. Afterwards run the command again with `--blip` to dump relation
 embeddings.
 
+### Precompute Full Graphs
+
+Scenes with many objects can exceed GPU memory when dumping features. The helper
+script below splits each ScanNet scene into subgraphs, dumps features per
+subgraph and merges them back into a full graph.
+
+```bash
+python open3dsg/scripts/precompute_full_graph.py --split train --out_dir <output_dir>
+```
+
+The script writes `relationships_<split>_full.json` and the merged feature
+files into the chosen output directory. These can be used with
+`--load_features` for training large scenes.
+
 ## Profile GPU Memory
 
 To inspect GPU memory usage of each pretrained component run:
