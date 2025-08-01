@@ -130,10 +130,13 @@ def profile_gpu(device_id: int, args, hparams):
                 )
             else:
                 _ = model.clip_encode_imgs(batch_gpu["object_imgs"], batch_gpu["relationship_imgs"])
+            torch.cuda.empty_cache()
             if args.blip:
                 _ = model.blip_encode_images(batch_gpu["blip_images"])
+                torch.cuda.empty_cache()
             elif args.llava:
                 _ = model.llava_encode_images(batch_gpu["blip_images"])
+                torch.cuda.empty_cache()
         else:
             _ = model(batch_gpu)
     record_vram("After inference", results)
