@@ -57,6 +57,8 @@ python open3dsg/scripts/run.py --dump_features --dataset [scannet/3rscan] --scal
 Running with `--dump_features` only extracts the features without training and disables the learning rate scheduler.
 
 In case of out of memory issues, seperate the BLIP export & the OpenSeg export.
+Setting `--clip_chunks N` splits each CLIP/OpenSeg batch into `N` smaller chunks
+to lower GPU memory usage during export.
 
 ## Profile GPU Memory
 

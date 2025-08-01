@@ -406,21 +406,30 @@ class SGPN(nn.Module):
 
         with torch.no_grad():
             obj_imgs_batched = obj_imgs.view(-1, 3, *img_dim)
-
-            if self.hparams['node_model']:
-                obj_clip_encoding = self.CLIP_NODE.encode_image(obj_imgs_batched).view(*obj_imgs.shape[:-3], -1)
-            else:
-                obj_clip_encoding = self.CLIP.encode_image(obj_imgs_batched).view(*obj_imgs.shape[:-3], -1)
+            chunks = self.hparams.get('clip_chunks', 1)
+            obj_chunks = torch.chunk(obj_imgs_batched, chunks, dim=0)
+            obj_encodings = []
+            for chunk in obj_chunks:
+                if self.hparams['node_model']:
+                    obj_encodings.append(self.CLIP_NODE.encode_image(chunk))
+                else:
+                    obj_encodings.append(self.CLIP.encode_image(chunk))
+                torch.cuda.empty_cache()
+            obj_clip_encoding = torch.cat(obj_encodings, dim=0).view(*obj_imgs.shape[:-3], -1)
             obj_clip_encoding = obj_clip_encoding/obj_clip_encoding.norm(dim=-1, keepdim=True)
 
             if not self.hparams.get('blip') or not self.hparams.get('llava'):
                 rel_img_dim = rel_imgs.shape[-2:]
                 rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
-                if self.hparams['edge_model']:
-                    rel_clip_encoding = self.CLIP_EDGE.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-                else:
-                    rel_clip_encoding = self.CLIP.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-
+                rel_chunks = torch.chunk(rel_imgs_batched, chunks, dim=0)
+                rel_encodings = []
+                for chunk in rel_chunks:
+                    if self.hparams['edge_model']:
+                        rel_encodings.append(self.CLIP_EDGE.encode_image(chunk))
+                    else:
+                        rel_encodings.append(self.CLIP.encode_image(chunk))
+                    torch.cuda.empty_cache()
+                rel_clip_encoding = torch.cat(rel_encodings, dim=0).view(*rel_imgs.shape[:-3], -1)
                 rel_clip_encoding = rel_clip_encoding/rel_clip_encoding.norm(dim=-1, keepdim=True)
             else:
                 rel_clip_encoding = None
@@ -456,12 +465,16 @@ class SGPN(nn.Module):
             rel_img_dim = rel_imgs.shape[-2:]
             with torch.no_grad():
                 rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
-
-                if self.hparams['edge_model']:
-                    rel_clip_encoding = self.CLIP_EDGE.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-                else:
-                    rel_clip_encoding = self.CLIP.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-
+                chunks = self.hparams.get('clip_chunks', 1)
+                rel_chunks = torch.chunk(rel_imgs_batched, chunks, dim=0)
+                rel_encodings = []
+                for chunk in rel_chunks:
+                    if self.hparams['edge_model']:
+                        rel_encodings.append(self.CLIP_EDGE.encode_image(chunk))
+                    else:
+                        rel_encodings.append(self.CLIP.encode_image(chunk))
+                    torch.cuda.empty_cache()
+                rel_clip_encoding = torch.cat(rel_encodings, dim=0).view(*rel_imgs.shape[:-3], -1)
                 rel_clip_encoding = rel_clip_encoding/rel_clip_encoding.norm(dim=-1, keepdim=True)
         else:
             rel_clip_encoding = None
