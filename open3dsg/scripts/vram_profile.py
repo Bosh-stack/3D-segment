@@ -177,8 +177,6 @@ def main():
     parser.add_argument("--scales", type=int, default=3)
     parser.add_argument("--max_nodes", type=int, default=10)
     parser.add_argument("--max_edges", type=int, default=100)
-    parser.add_argument('--clip_chunks', type=int, default=1,
-                        help='split CLIP/OpenSeg batches into this many sub-batches')
     parser.add_argument(
         "--gpus",
         type=int,
@@ -212,7 +210,6 @@ def main():
         "max_edges": args.max_edges,
         "load_features": args.load_features,
         "dump_features": args.dump_features,
-        "clip_chunks": args.clip_chunks,
         "test": False,
     }
 
