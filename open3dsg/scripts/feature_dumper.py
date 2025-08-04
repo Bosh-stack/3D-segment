@@ -80,6 +80,11 @@ class FeatureDumper:
         elif self.hparams.get('llava'):
             self.model.load_pretrained_llava_model()
 
+        device = (
+            self.model.clip_device if torch.cuda.is_available() else torch.device("cpu")
+        )
+        self.model.to(device)
+
     def _forward(self, data_dict):
         data_dict = self.model(data_dict)
         return data_dict
