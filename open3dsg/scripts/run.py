@@ -80,6 +80,7 @@ def get_args():
     parser.add_argument('--avg_blip_emb', action='store_true', help="Average the blip embeddings across patches")
     parser.add_argument('--blip_proj_layers', type=int, default=3,
                         help="Number of projection layers to match blip embedding")
+    parser.add_argument('--blip_batch_size', type=int, default=32, help='Batch size for BLIP image encoding')
     parser.add_argument('--llava', action="store_true", help="Use llava for relation prediction")
     parser.add_argument('--avg_llava_emb', action="store_true", help="Average the llava embeddings across patches")
     parser.add_argument('--pointnet2', action="store_true",
