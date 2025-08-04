@@ -14,6 +14,7 @@ import json
 import os
 import random
 from datetime import datetime
+import gc
 
 import numpy as np
 import torch
@@ -257,6 +258,12 @@ def main():
         module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
         if rank == 0:
             pbar.update(len(data_dict.get('scan_id', [])))
+
+        # Free GPU and CPU memory after processing each scene
+        del data_dict
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     if rank == 0:
         pbar.close()
