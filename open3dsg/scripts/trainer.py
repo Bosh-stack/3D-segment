@@ -142,7 +142,8 @@ class D3SSGModule(lightning.LightningModule):
                 llava=self.hparams.get('llava', False),
                 max_objects=self.hparams.get('max_nodes', None),
                 max_rels=self.hparams.get('max_edges', None),
-                skip_edge_features=self.hparams.get('skip_edge_features', False)
+                skip_edge_features=self.hparams.get('skip_edge_features', False),
+                load_node_features_only=self.hparams.get('load_node_features_only', False)
             )
 
             # load pre-trained models

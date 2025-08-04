@@ -194,7 +194,8 @@ class Open2D3DSGDataset(Dataset):
                  blip=False,
                  llava=False,
                  half=False,
-                 skip_edge_features=False
+                 skip_edge_features=False,
+                 load_node_features_only=False
                  ):
         self.img_dim = img_dim
         self.rel_img_dim = rel_img_dim if rel_img_dim else img_dim
@@ -207,6 +208,7 @@ class Open2D3DSGDataset(Dataset):
         self.blip = blip
         self.llava = llava
         self.skip_edge_features = skip_edge_features
+        self.load_node_features_only = load_node_features_only
         self.max_objs = max_objects
         self.max_rels = max_rels
 
@@ -586,12 +588,54 @@ class Open2D3DSGDataset(Dataset):
 
         return data_dict
 
+    def load_rel_imgs(self, data_dict):
+        if self.skip_edge_features:
+            data_dict['rel2frame_mask'] = np.zeros(self.max_rels)
+            data_dict['relationship_imgs'] = torch.zeros(
+                (self.max_rels, self.top_k_frames * self.scales, 3, self.rel_img_dim, self.rel_img_dim)
+            )
+            if self.blip or self.llava:
+                blank_img_dim = (320, 240) if data_dict['dataset'] == 'scannet' else (224, 172)
+                black_image = Image.new('RGB', blank_img_dim, (0, 0, 0))
+                data_dict['blip_images'] = [[black_image] * self.top_k_frames * self.scales for _ in range(self.max_rels)]
+                data_dict['blip_mask'] = {k: 0 for k in data_dict['rel2frame'].keys()}
+        elif self.blip or self.llava:
+            rel_imgs, rel2frame_mask = self.blip_rel_frames(
+                data_dict["rel2frame"], data_dict['rel2frame_mask'], data_dict["scene_id"], data_dict['dataset'],
+                top_k=self.top_k_frames, scales=self.scales
+            )
+            blank_img_dim = (320, 240) if data_dict['dataset'] == 'scannet' else (224, 172)
+            black_image = Image.new('RGB', blank_img_dim, (0, 0, 0))
+            rel_imgs.extend([[black_image] * self.top_k_frames * self.scales] * (self.max_rels - len(rel_imgs)))
+            data_dict['blip_images'] = rel_imgs
+            data_dict['blip_mask'] = rel2frame_mask
+            data_dict['rel2frame_mask'] = np.array(list(rel2frame_mask.values())).astype(float)
+            padding_width = ((0, self.max_rels - data_dict["rel2frame_mask"].shape[0]),)
+            data_dict["rel2frame_mask"] = np.pad(data_dict["rel2frame_mask"], padding_width, mode='constant', constant_values=0)
+            data_dict["rel2frame_mask"] = data_dict["rel2frame_mask"]
+            data_dict["relationship_imgs"] = []
+        else:
+            rel_imgs, rel2frame_mask = self.rel_frame_selection(
+                data_dict["rel2frame"], data_dict['rel2frame_mask'], data_dict["scene_id"], data_dict['dataset'],
+                top_k=self.top_k_frames, scales=self.scales
+            )
+            rel_imgs = torch.stack(rel_imgs, dim=0)
+            data_dict["relationship_imgs"] = torch.zeros((self.max_rels, *rel_imgs.shape[1:]))
+            data_dict["relationship_imgs"][:len(rel_imgs)] = rel_imgs
+            data_dict['rel2frame_mask'] = np.array(list(rel2frame_mask.values())).astype(float)
+            padding_width = ((0, self.max_rels - data_dict["rel2frame_mask"].shape[0]),)
+            data_dict["rel2frame_mask"] = np.pad(data_dict["rel2frame_mask"], padding_width, mode='constant', constant_values=0)
+            data_dict["rel2frame_mask"] = data_dict["rel2frame_mask"]
+        return data_dict
+
     def load_features_disk(self, data_dict):
         scan_id = data_dict['scan_id']
         obj_valid_rel_path = sorted(os.listdir(self.load_features))
         obj_dir = [d for d in obj_valid_rel_path if 'export_obj_clip_emb' in d][0]
         valid_dir = [d for d in obj_valid_rel_path if 'export_obj_clip_valids' in d][0]
         rel_dirs = [d for d in obj_valid_rel_path if 'export_rel_clip_emb' in d]
+        if self.load_node_features_only:
+            rel_dirs = []
 
         torch_numpy = '.pt'
         obj_feature_pth = os.path.join(self.load_features, obj_dir, scan_id+torch_numpy)
@@ -677,6 +721,9 @@ class Open2D3DSGDataset(Dataset):
 
         if not self.load_features:
             data_dict = self.load_imgs(data_dict)
+        elif self.load_node_features_only:
+            data_dict = self.load_features_disk(data_dict)
+            data_dict = self.load_rel_imgs(data_dict)
         else:
             data_dict = self.load_features_disk(data_dict)
 
