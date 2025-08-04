@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
-from open3dsg.scripts.trainer import D3SSGModule
+from open3dsg.scripts.feature_dumper import FeatureDumper
 
 
 def get_args():
@@ -166,8 +166,8 @@ def main():
         hparams['skip_edge_features'] = False
         hparams['load_node_features_only'] = True
 
-    module = D3SSGModule(hparams)
-    module.setup('fit')
+    module = FeatureDumper(hparams)
+    module.setup()
     module.model.eval()
 
     if args.stage == 'nodes':
