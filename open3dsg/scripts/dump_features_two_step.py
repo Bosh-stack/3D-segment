@@ -233,27 +233,15 @@ def main():
     if rank == 0:
         pbar = tqdm(total=len(sampler), desc="Processing scenes")
     for data_dict in dataloader:
-        for k, v in data_dict.items():
-            if isinstance(v, torch.Tensor):
-                data_dict[k] = v.to(device)
+        # Move only image tensors to the GPU; keep the rest on CPU to save memory
+        if 'object_imgs' in data_dict:
+            data_dict['object_imgs'] = data_dict['object_imgs'].to(device)
+        if 'relationship_imgs' in data_dict:
+            data_dict['relationship_imgs'] = data_dict['relationship_imgs'].to(device)
+        if 'blip_images' in data_dict:
+            data_dict['blip_images'] = data_dict['blip_images'].to(device)
 
-        if args.stage == 'nodes':
-            data_dict = module._forward(data_dict)
-        else:
-            if args.blip:
-                data_dict['clip_rel_encoding'] = module.model.blip_encode_images(
-                    data_dict['blip_images'], batch_size=args.blip_batch_size
-                )
-            elif args.llava:
-                data_dict['clip_rel_encoding'] = module.model.llava_encode_images(data_dict['blip_images'])
-            else:
-                dummy = torch.zeros(
-                    data_dict['objects_id'].size(0), 1, 1, 3,
-                    dataset.img_dim, dataset.img_dim, device=device
-                )
-                rel_imgs = data_dict['relationship_imgs'].to(device)
-                _, rel_feats = module.model.clip_encode_imgs(dummy, rel_imgs)
-                data_dict['clip_rel_encoding'] = rel_feats
+        data_dict = module.encode_features(data_dict)
 
         module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
         if rank == 0:

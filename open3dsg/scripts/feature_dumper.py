@@ -19,13 +19,33 @@ def inplace_relu(m):
         m.inplace = True
 
 
+class MinimalSGPN(SGPN):
+    """Lightweight wrapper exposing only the 2D encoders from :class:`SGPN`."""
+
+    def __init__(self, hparams):
+        # Skip heavy initialisation by avoiding ``SGPN.__init__``.
+        torch.nn.Module.__init__(self)
+        self.hparams = hparams
+
+        # Placeholders populated during setup.
+        self.CLIP = None
+        self.CLIP_NODE = None
+        self.CLIP_EDGE = None
+        self.OPENSEG = None
+        self.BLIP = None
+        self.LLaVA = None
+        self.PROCESSOR = None
+        self.clip_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.blip_pos_encoding = None
+
+
 class FeatureDumper:
     """Utility class for precomputing 2D features without Lightning overhead."""
 
     def __init__(self, hparams):
         self.hparams = hparams
-        self.model = SGPN(self.hparams)
-        self.model.apply(inplace_relu)
+        # Only keep lightweight 2D encoders.
+        self.model = MinimalSGPN(self.hparams)
 
         # default path for dumping node features when stage == 'nodes'
         self.clip_path = os.path.join(
@@ -35,11 +55,7 @@ class FeatureDumper:
         self.CLIP_NONE_EMB = None
 
     def setup(self):
-        """Load pretrained models required for feature extraction."""
-        if not self.hparams.get('clean_pointnet') and not self.model.rgb and not self.model.nrm:
-            self.model.load_pretained_cls_model(self.model.objPointNet)
-            self.model.load_pretained_cls_model(self.model.relPointNet)
-
+        """Load pretrained 2D models required for feature extraction."""
         if self.hparams['clip_model'] == 'OpenSeg':
             self.model.OPENSEG = self.model.load_pretrained_clip_model(
                 target_model=self.model.OPENSEG, model=self.hparams['clip_model']
@@ -85,8 +101,52 @@ class FeatureDumper:
         )
         self.model.to(device)
 
-    def _forward(self, data_dict):
-        data_dict = self.model(data_dict)
+    def encode_features(self, data_dict):
+        """Populate ``clip_obj_encoding`` and ``clip_rel_encoding`` using 2D encoders."""
+
+        device = (
+            self.model.clip_device if torch.cuda.is_available() else torch.device("cpu")
+        )
+
+        obj_imgs = data_dict.get('object_imgs')
+        rel_imgs = data_dict.get('relationship_imgs')
+
+        if obj_imgs is not None:
+            obj_imgs = obj_imgs.to(device)
+        if rel_imgs is not None:
+            rel_imgs = rel_imgs.to(device)
+
+        clip_rel_feats = None
+
+        if obj_imgs is not None:
+            rel_input = rel_imgs
+            if rel_input is None:
+                rel_input = torch.zeros(
+                    obj_imgs.size(0), 1, 1, 3, obj_imgs.size(-2), obj_imgs.size(-1),
+                    device=obj_imgs.device,
+                )
+            clip_obj_feats, clip_rel_feats = self.model.clip_encode_imgs(
+                obj_imgs, rel_input
+            )
+            data_dict['clip_obj_encoding'] = clip_obj_feats
+        elif rel_imgs is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
+            dummy = torch.zeros(
+                rel_imgs.size(0), 1, 1, 3, rel_imgs.size(-2), rel_imgs.size(-1),
+                device=rel_imgs.device,
+            )
+            _, clip_rel_feats = self.model.clip_encode_imgs(dummy, rel_imgs)
+
+        if self.hparams.get('blip'):
+            blip_imgs = data_dict['blip_images'].to(device)
+            data_dict['clip_rel_encoding'] = self.model.blip_encode_images(
+                blip_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
+            )
+        elif self.hparams.get('llava'):
+            blip_imgs = data_dict['blip_images'].to(device)
+            data_dict['clip_rel_encoding'] = self.model.llava_encode_images(blip_imgs)
+        elif clip_rel_feats is not None:
+            data_dict['clip_rel_encoding'] = clip_rel_feats
+
         return data_dict
 
     def _mask_features(self, data_dict, clip_obj_emb, clip_rel_emb, bidx, obj_count, rel_count):
