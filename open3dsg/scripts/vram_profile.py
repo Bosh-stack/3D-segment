@@ -133,7 +133,9 @@ def profile_gpu(device_id: int, args, hparams):
                 _ = model.clip_encode_imgs(batch_gpu["object_imgs"], batch_gpu["relationship_imgs"])
             torch.cuda.empty_cache()
             if args.blip:
-                _ = model.blip_encode_images(batch_gpu["blip_images"])
+                _ = model.blip_encode_images(
+                    batch_gpu["blip_images"], batch_size=args.blip_batch_size
+                )
                 torch.cuda.empty_cache()
             elif args.llava:
                 _ = model.llava_encode_images(batch_gpu["blip_images"])
@@ -161,6 +163,12 @@ def main():
     parser.add_argument("--edge_model", default=None)
     parser.add_argument("--blip", action="store_true")
     parser.add_argument("--llava", action="store_true")
+    parser.add_argument(
+        "--blip_batch_size",
+        type=int,
+        default=32,
+        help="Batch size for BLIP image encoding",
+    )
     parser.add_argument('--avg_blip_emb', action='store_true',
                         help='Average the blip embeddings across patches')
     parser.add_argument('--blip_proj_layers', type=int, default=3,
@@ -209,6 +217,7 @@ def main():
         "edge_model": args.edge_model,
         "blip": args.blip,
         "llava": args.llava,
+        "blip_batch_size": args.blip_batch_size,
         "avg_blip_emb": args.avg_blip_emb,
         "blip_proj_layers": args.blip_proj_layers,
         "avg_llava_emb": args.avg_llava_emb,

@@ -291,7 +291,10 @@ class SGPN(nn.Module):
                 obj_clip_encoding, rel_clip_encoding = self.clip_encode_imgs(data_dict['object_imgs'], data_dict['relationship_imgs'])
             data_dict['clip_obj_encoding'], data_dict['clip_rel_encoding'] = obj_clip_encoding, rel_clip_encoding
             if self.hparams.get('blip'):
-                data_dict['clip_rel_encoding'] = self.blip_encode_images(data_dict['blip_images'])
+                data_dict['clip_rel_encoding'] = self.blip_encode_images(
+                    data_dict['blip_images'],
+                    batch_size=self.hparams.get('blip_batch_size', 32),
+                )
             elif self.hparams.get('llava'):
                 data_dict['clip_rel_encoding'] = self.llava_encode_images(data_dict['blip_images'])
 
@@ -469,13 +472,18 @@ class SGPN(nn.Module):
         return torch.from_numpy(obj_embedding).to(obj_imgs.device), rel_clip_encoding
 
     @torch.no_grad()
-    def blip_encode_images(self, rel_imgs):
+    def blip_encode_images(self, rel_imgs, batch_size: int = 32):
         rel_images_tensor = np.array(rel_imgs)
-        rel_images_tensor.shape
+        flat_imgs = rel_images_tensor.flatten().tolist()
+        rel_embeds = []
         with torch.no_grad():
-            inputs = self.PROCESSOR(images=rel_images_tensor.flatten().tolist(), text=None, return_tensors="pt").to(self.clip_device)
+            for i in range(0, len(flat_imgs), batch_size):
+                batch = flat_imgs[i:i + batch_size]
+                inputs = self.PROCESSOR(images=batch, text=None, return_tensors="pt").to(self.clip_device)
+                rel_embeds.append(self.BLIP.embedd_image(inputs['pixel_values']))
+                torch.cuda.empty_cache()
 
-            rel_embeds = self.BLIP.embedd_image(inputs['pixel_values']).view((*rel_images_tensor.shape, 257, 1408))
+        rel_embeds = torch.cat(rel_embeds, dim=0).view((*rel_images_tensor.shape, 257, 1408))
         return rel_embeds
 
     @torch.no_grad()
