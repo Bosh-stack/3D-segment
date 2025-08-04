@@ -3,9 +3,10 @@
 
 """Dump CLIP features in two stages.
 
-Usage:
-    python open3dsg/scripts/dump_features_two_step.py --stage nodes ...
-    python open3dsg/scripts/dump_features_two_step.py --stage edges --load_node_features <dir> ...
+Run with ``torchrun`` so that one process is spawned per GPU::
+
+    torchrun --nproc_per_node=<NGPUS> open3dsg/scripts/dump_features_two_step.py --stage nodes ...
+    torchrun --nproc_per_node=<NGPUS> open3dsg/scripts/dump_features_two_step.py --stage edges --load_node_features <dir> ...
 """
 
 import argparse
@@ -16,7 +17,10 @@ from datetime import datetime
 
 import numpy as np
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from open3dsg.config.config import CONF
@@ -153,6 +157,18 @@ def build_dataset(args, load_features, skip_edge_features, load_node_features_on
 def main():
     args = get_args()
 
+    # Distributed setup
+    if torch.cuda.is_available():
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group("nccl")
+    else:
+        local_rank = 0
+        dist.init_process_group("gloo")
+
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -169,6 +185,9 @@ def main():
 
     module = FeatureDumper(hparams)
     module.setup()
+    device = torch.device(local_rank) if torch.cuda.is_available() else torch.device('cpu')
+    module.model.to(device)
+    module.model = DDP(module.model, device_ids=[local_rank] if torch.cuda.is_available() else None)
     module.model.eval()
 
     if args.stage == 'nodes':
@@ -180,44 +199,51 @@ def main():
         dataset = build_dataset(args, args.load_node_features, False, load_node_features_only=True)
         feature_dir = args.load_node_features
 
+    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
     dataloader = DataLoader(
         dataset,
         batch_size=args.batch_size,
-        shuffle=False,
+        sampler=sampler,
         num_workers=args.workers,
         collate_fn=dataset.collate_fn,
     )
 
-    device = module.model.clip_device if torch.cuda.is_available() else torch.device('cpu')
+    if rank == 0:
+        pbar = tqdm(total=len(sampler), desc="Processing scenes")
+    for data_dict in dataloader:
+        for k, v in data_dict.items():
+            if isinstance(v, torch.Tensor):
+                data_dict[k] = v.to(device)
 
-    with tqdm(total=len(dataset), desc="Processing scenes") as pbar:
-        for data_dict in dataloader:
-            for k, v in data_dict.items():
-                if isinstance(v, torch.Tensor):
-                    data_dict[k] = v.to(device)
-
-            if args.stage == 'nodes':
-                data_dict = module._forward(data_dict)
+        if args.stage == 'nodes':
+            data_dict = module._forward(data_dict)
+        else:
+            if args.blip:
+                data_dict['clip_rel_encoding'] = module.model.blip_encode_images(
+                    data_dict['blip_images'], batch_size=args.blip_batch_size
+                )
+            elif args.llava:
+                data_dict['clip_rel_encoding'] = module.model.llava_encode_images(data_dict['blip_images'])
             else:
-                if args.blip:
-                    data_dict['clip_rel_encoding'] = module.model.blip_encode_images(
-                        data_dict['blip_images'], batch_size=args.blip_batch_size
-                    )
-                elif args.llava:
-                    data_dict['clip_rel_encoding'] = module.model.llava_encode_images(data_dict['blip_images'])
-                else:
-                    dummy = torch.zeros(
-                        data_dict['objects_id'].size(0), 1, 1, 3,
-                        dataset.img_dim, dataset.img_dim, device=device
-                    )
-                    rel_imgs = data_dict['relationship_imgs'].to(device)
-                    _, rel_feats = module.model.clip_encode_imgs(dummy, rel_imgs)
-                    data_dict['clip_rel_encoding'] = rel_feats
+                dummy = torch.zeros(
+                    data_dict['objects_id'].size(0), 1, 1, 3,
+                    dataset.img_dim, dataset.img_dim, device=device
+                )
+                rel_imgs = data_dict['relationship_imgs'].to(device)
+                _, rel_feats = module.model.clip_encode_imgs(dummy, rel_imgs)
+                data_dict['clip_rel_encoding'] = rel_feats
 
-            module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
+        module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
+        if rank == 0:
             pbar.update(len(data_dict.get('scan_id', [])))
 
-    print(f"Features saved to {feature_dir}")
+    if rank == 0:
+        pbar.close()
+
+    dist.barrier()
+    if rank == 0:
+        print(f"Features saved to {feature_dir}")
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
