@@ -17,6 +17,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
@@ -189,30 +190,32 @@ def main():
 
     device = module.model.clip_device if torch.cuda.is_available() else torch.device('cpu')
 
-    for data_dict in dataloader:
-        for k, v in data_dict.items():
-            if isinstance(v, torch.Tensor):
-                data_dict[k] = v.to(device)
+    with tqdm(total=len(dataset), desc="Processing scenes") as pbar:
+        for data_dict in dataloader:
+            for k, v in data_dict.items():
+                if isinstance(v, torch.Tensor):
+                    data_dict[k] = v.to(device)
 
-        if args.stage == 'nodes':
-            data_dict = module._forward(data_dict)
-        else:
-            if args.blip:
-                data_dict['clip_rel_encoding'] = module.model.blip_encode_images(
-                    data_dict['blip_images'], batch_size=args.blip_batch_size
-                )
-            elif args.llava:
-                data_dict['clip_rel_encoding'] = module.model.llava_encode_images(data_dict['blip_images'])
+            if args.stage == 'nodes':
+                data_dict = module._forward(data_dict)
             else:
-                dummy = torch.zeros(
-                    data_dict['objects_id'].size(0), 1, 1, 3,
-                    dataset.img_dim, dataset.img_dim, device=device
-                )
-                rel_imgs = data_dict['relationship_imgs'].to(device)
-                _, rel_feats = module.model.clip_encode_imgs(dummy, rel_imgs)
-                data_dict['clip_rel_encoding'] = rel_feats
+                if args.blip:
+                    data_dict['clip_rel_encoding'] = module.model.blip_encode_images(
+                        data_dict['blip_images'], batch_size=args.blip_batch_size
+                    )
+                elif args.llava:
+                    data_dict['clip_rel_encoding'] = module.model.llava_encode_images(data_dict['blip_images'])
+                else:
+                    dummy = torch.zeros(
+                        data_dict['objects_id'].size(0), 1, 1, 3,
+                        dataset.img_dim, dataset.img_dim, device=device
+                    )
+                    rel_imgs = data_dict['relationship_imgs'].to(device)
+                    _, rel_feats = module.model.clip_encode_imgs(dummy, rel_imgs)
+                    data_dict['clip_rel_encoding'] = rel_feats
 
-        module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
+            module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
+            pbar.update(len(data_dict.get('scan_id', [])))
 
     print(f"Features saved to {feature_dir}")
 
