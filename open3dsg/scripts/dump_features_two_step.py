@@ -130,7 +130,11 @@ def build_dataset(args, load_features, skip_edge_features, load_node_features_on
 
     relationships_scannet = load_scan(base_path, "subgraphs/relationships_train.json")
 
-    img_dim = 336 if args.clip_model == 'ViT-L/14@336px' else 224
+    if args.clip_model == 'OpenSeg':
+        img_dim = 336 if args.node_model == 'ViT-L/14@336px' else 224
+    else:
+        img_dim = 336 if args.clip_model == 'ViT-L/14@336px' else 224
+
     rel_img_dim = img_dim
     if args.edge_model:
         rel_img_dim = 336 if args.edge_model == 'ViT-L/14@336px' else 224
