@@ -107,6 +107,9 @@ def main():
         if frames_pkl.exists():
             with open(frames_pkl, "rb") as fr:
                 obj2frame = pickle.load(fr)
+            # limit object2frame to max_nodes objects to stay in sync with
+            # the truncated nodes above
+            obj2frame = {k: v for k, v in obj2frame.items() if k < args.max_nodes}
         else:
             obj2frame = {}
 
