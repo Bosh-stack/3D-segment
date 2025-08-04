@@ -158,16 +158,34 @@ def main():
     args = get_args()
 
     # Distributed setup
-    if torch.cuda.is_available():
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group("nccl")
+    # Determine rank and world size from environment, defaulting to a
+    # single-process run when not provided.
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
     else:
-        local_rank = 0
-        dist.init_process_group("gloo")
+        rank = 0
+        world_size = 1
 
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
+    # Use a TCP init method when initializing manually. The address is only
+    # relevant when more than one process is used.
+    init_method = "tcp://127.0.0.1:29500"
+
+    if world_size > 1:
+        if torch.cuda.is_available():
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            torch.cuda.set_device(local_rank)
+            dist.init_process_group(
+                "nccl", init_method=init_method, rank=rank, world_size=world_size
+            )
+        else:
+            local_rank = 0
+            dist.init_process_group(
+                "gloo", init_method=init_method, rank=rank, world_size=world_size
+            )
+    else:
+        # Single-process case: avoid initializing torch.distributed.
+        local_rank = 0
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -185,9 +203,12 @@ def main():
 
     module = FeatureDumper(hparams)
     module.setup()
-    device = torch.device(local_rank) if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device(local_rank) if torch.cuda.is_available() else torch.device("cpu")
     module.model.to(device)
-    module.model = DDP(module.model, device_ids=[local_rank] if torch.cuda.is_available() else None)
+    if world_size > 1:
+        module.model = DDP(
+            module.model, device_ids=[local_rank] if torch.cuda.is_available() else None
+        )
     module.model.eval()
 
     if args.stage == 'nodes':
@@ -240,10 +261,12 @@ def main():
     if rank == 0:
         pbar.close()
 
-    dist.barrier()
+    if world_size > 1:
+        dist.barrier()
     if rank == 0:
         print(f"Features saved to {feature_dir}")
-    dist.destroy_process_group()
+    if world_size > 1:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
