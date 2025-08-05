@@ -27,6 +27,7 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
     rel_img_dim = img_dim
     if args.edge_model:
         rel_img_dim = 336 if args.edge_model == "ViT-L/14@336px" else 224
+    use_blip = args.blip and not skip_edge_features
     return Open2D3DSGDataset(
         relationships_R3SCAN=None,
         relationships_scannet=relationships,
@@ -38,8 +39,7 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
         max_objects=args.max_nodes,
         max_rels=args.max_edges,
         load_features=load_features,
-        blip=args.blip,
-        llava=args.llava,
+        blip=use_blip,
         skip_edge_features=skip_edge_features,
         load_node_features_only=load_node_features_only,
     )
@@ -93,7 +93,6 @@ def _compute_edge_features(args, feature_dir):
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
         "blip": args.blip,
-        "llava": args.llava,
     }
     dumper = FeatureDumper(hparams)
     dumper.setup()
@@ -131,7 +130,6 @@ def _parse_args():
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
     parser.add_argument("--blip", action="store_true")
-    parser.add_argument("--llava", action="store_true")
     parser.add_argument("--out_dir", default=None, help="directory to store features")
     return parser.parse_args()
 
