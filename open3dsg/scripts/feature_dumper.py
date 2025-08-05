@@ -113,6 +113,13 @@ class FeatureDumper:
         """Populate ``clip_obj_encoding`` and ``clip_rel_encoding`` using 2D encoders."""
 
         device = next(self.model.parameters()).device
+        model = (
+            self.model.module
+            if isinstance(
+                self.model, torch.nn.parallel.DistributedDataParallel
+            )
+            else self.model
+        )
 
         obj_imgs = data_dict.get('object_imgs')
         rel_imgs = data_dict.get('relationship_imgs')
@@ -139,7 +146,7 @@ class FeatureDumper:
                     obj_raw_imgs.size(0), 1, 1, 3, obj_raw_imgs.size(-2), obj_raw_imgs.size(-1),
                     device=obj_raw_imgs.device,
                 )
-            clip_obj_feats, clip_rel_feats = self.model.clip_encode_pixels(
+            clip_obj_feats, clip_rel_feats = model.clip_encode_pixels(
                 obj_raw_imgs, obj_pixels, obj_nums, rel_input
             )
             data_dict['clip_obj_encoding'] = clip_obj_feats
@@ -150,7 +157,7 @@ class FeatureDumper:
                     obj_imgs.size(0), 1, 1, 3, obj_imgs.size(-2), obj_imgs.size(-1),
                     device=obj_imgs.device,
                 )
-            clip_obj_feats, clip_rel_feats = self.model.clip_encode_imgs(
+            clip_obj_feats, clip_rel_feats = model.clip_encode_imgs(
                 obj_imgs, rel_input
             )
             data_dict['clip_obj_encoding'] = clip_obj_feats
@@ -159,14 +166,14 @@ class FeatureDumper:
                 rel_imgs.size(0), 1, 1, 3, rel_imgs.size(-2), rel_imgs.size(-1),
                 device=rel_imgs.device,
             )
-            _, clip_rel_feats = self.model.clip_encode_imgs(dummy, rel_imgs)
+            _, clip_rel_feats = model.clip_encode_imgs(dummy, rel_imgs)
 
         if self.hparams.get('blip') and rel_imgs is not None:
-            data_dict['clip_rel_encoding'] = self.model.blip_encode_images(
+            data_dict['clip_rel_encoding'] = model.blip_encode_images(
                 rel_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
             )
         elif self.hparams.get('llava') and rel_imgs is not None:
-            data_dict['clip_rel_encoding'] = self.model.llava_encode_images(rel_imgs)
+            data_dict['clip_rel_encoding'] = model.llava_encode_images(rel_imgs)
         elif clip_rel_feats is not None:
             data_dict['clip_rel_encoding'] = clip_rel_feats
 
