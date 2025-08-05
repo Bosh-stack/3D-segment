@@ -22,7 +22,7 @@ def inplace_relu(m):
 class MinimalSGPN(SGPN):
     """Lightweight wrapper exposing only the 2D encoders from :class:`SGPN`."""
 
-    def __init__(self, hparams):
+    def __init__(self, hparams, device: int = 0):
         # Skip heavy initialisation by avoiding ``SGPN.__init__``.
         torch.nn.Module.__init__(self)
         self.hparams = hparams
@@ -35,19 +35,21 @@ class MinimalSGPN(SGPN):
         self.BLIP = None
         self.LLaVA = None
         self.PROCESSOR = None
-        self.clip_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.clip_device = torch.device(
+            f"cuda:{device}" if torch.cuda.is_available() else "cpu"
+        )
         self.blip_pos_encoding = None
 
 
 class FeatureDumper:
     """Utility class for precomputing 2D features without Lightning overhead."""
 
-    def __init__(self, hparams):
+    def __init__(self, hparams, device: int = 0):
         self.hparams = hparams
         self.hparams.setdefault("load_features", False)
         self.hparams.setdefault("test", False)
         # Only keep lightweight 2D encoders.
-        self.model = MinimalSGPN(self.hparams)
+        self.model = MinimalSGPN(self.hparams, device=device)
 
         # default path for dumping node features when stage == 'nodes'
         self.clip_path = os.path.join(
