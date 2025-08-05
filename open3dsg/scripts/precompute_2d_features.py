@@ -81,23 +81,30 @@ def _compute_node_features(args):
 
 
 def _compute_edge_features(args, feature_dir):
+    edge_model = args.edge_model or args.clip_model
+    if args.blip:
+        edge_model = None
     hparams = {
         "clip_model": args.clip_model,
         "node_model": args.node_model,
-        "edge_model": args.edge_model or args.clip_model,
+        "edge_model": edge_model,
         "dump_features": True,
         "skip_edge_features": False,
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
+        "blip": args.blip,
+        "llava": args.llava,
     }
     dumper = FeatureDumper(hparams)
     dumper.setup()
-    dataset = _build_dataset(args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True)
+    dataset = _build_dataset(
+        args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True
+    )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
     for batch in tqdm(loader, desc="Edges"):
-        if torch.cuda.is_available() and "relationship_imgs" in batch:
+        if torch.cuda.is_available() and "relationship_imgs" in batch and torch.is_tensor(batch["relationship_imgs"]):
             batch["relationship_imgs"] = batch["relationship_imgs"].cuda(non_blocking=True)
-        if torch.cuda.is_available() and "blip_images" in batch:
+        if torch.cuda.is_available() and "blip_images" in batch and torch.is_tensor(batch["blip_images"]):
             batch["blip_images"] = batch["blip_images"].cuda(non_blocking=True)
         with torch.no_grad():
             batch = dumper.encode_features(batch)
