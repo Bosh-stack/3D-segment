@@ -112,16 +112,35 @@ class FeatureDumper:
 
         obj_imgs = data_dict.get('object_imgs')
         rel_imgs = data_dict.get('relationship_imgs')
+        obj_raw_imgs = data_dict.get('object_raw_imgs')
+        obj_pixels = data_dict.get('object_pixels')
+        obj_nums = data_dict.get('objects_count')
 
-        if obj_imgs is not None:
+        if obj_imgs is not None and torch.is_tensor(obj_imgs):
             obj_imgs = obj_imgs.to(device)
-        if rel_imgs is not None:
+        if obj_raw_imgs is not None and torch.is_tensor(obj_raw_imgs):
+            obj_raw_imgs = obj_raw_imgs.to(device)
+        if rel_imgs is not None and torch.is_tensor(rel_imgs):
             rel_imgs = rel_imgs.to(device)
+
+        if (rel_imgs is None or (isinstance(rel_imgs, list) and len(rel_imgs) == 0)) and self.hparams.get('blip'):
+            rel_imgs = data_dict.get('blip_images')
 
         clip_rel_feats = None
 
-        if obj_imgs is not None:
-            rel_input = rel_imgs
+        if self.hparams['clip_model'] == 'OpenSeg' and obj_raw_imgs is not None:
+            rel_input = rel_imgs if torch.is_tensor(rel_imgs) else None
+            if rel_input is None:
+                rel_input = torch.zeros(
+                    obj_raw_imgs.size(0), 1, 1, 3, obj_raw_imgs.size(-2), obj_raw_imgs.size(-1),
+                    device=obj_raw_imgs.device,
+                )
+            clip_obj_feats, clip_rel_feats = self.model.clip_encode_pixels(
+                obj_raw_imgs, obj_pixels, obj_nums, rel_input
+            )
+            data_dict['clip_obj_encoding'] = clip_obj_feats
+        elif obj_imgs is not None:
+            rel_input = rel_imgs if torch.is_tensor(rel_imgs) else None
             if rel_input is None:
                 rel_input = torch.zeros(
                     obj_imgs.size(0), 1, 1, 3, obj_imgs.size(-2), obj_imgs.size(-1),
@@ -131,21 +150,19 @@ class FeatureDumper:
                 obj_imgs, rel_input
             )
             data_dict['clip_obj_encoding'] = clip_obj_feats
-        elif rel_imgs is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
+        elif isinstance(rel_imgs, torch.Tensor) and not self.hparams.get('blip') and not self.hparams.get('llava'):
             dummy = torch.zeros(
                 rel_imgs.size(0), 1, 1, 3, rel_imgs.size(-2), rel_imgs.size(-1),
                 device=rel_imgs.device,
             )
             _, clip_rel_feats = self.model.clip_encode_imgs(dummy, rel_imgs)
 
-        if self.hparams.get('blip'):
-            blip_imgs = data_dict['blip_images'].to(device)
+        if self.hparams.get('blip') and rel_imgs is not None:
             data_dict['clip_rel_encoding'] = self.model.blip_encode_images(
-                blip_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
+                rel_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
             )
-        elif self.hparams.get('llava'):
-            blip_imgs = data_dict['blip_images'].to(device)
-            data_dict['clip_rel_encoding'] = self.model.llava_encode_images(blip_imgs)
+        elif self.hparams.get('llava') and rel_imgs is not None:
+            data_dict['clip_rel_encoding'] = self.model.llava_encode_images(rel_imgs)
         elif clip_rel_feats is not None:
             data_dict['clip_rel_encoding'] = clip_rel_feats
 
