@@ -5,6 +5,7 @@ import gc
 
 import torch
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
@@ -136,21 +137,32 @@ def _parse_args():
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
     parser.add_argument("--out_dir", default=None, help="directory to store features")
-    parser.add_argument(
-        "--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", 0))
-    )
+    parser.add_argument("--gpus", type=int, default=torch.cuda.device_count())
     args = parser.parse_args()
     return args
 
 
-def main():
-    args = _parse_args()
-    local_rank = args.local_rank
-    dist.init_process_group("nccl")
+def main_worker(local_rank, args):
     torch.cuda.set_device(local_rank)
+    if args.gpus > 1:
+        dist.init_process_group(
+            "nccl", init_method="tcp://127.0.0.1:29500", rank=local_rank, world_size=args.gpus
+        )
+
     feature_dir = _compute_node_features(args, local_rank)
     _compute_edge_features(args, feature_dir, local_rank)
-    dist.barrier()
+
+    if args.gpus > 1:
+        dist.barrier()
+        dist.destroy_process_group()
+
+
+def main():
+    args = _parse_args()
+    if args.gpus > 1:
+        mp.spawn(main_worker, nprocs=args.gpus, args=(args,))
+    else:
+        main_worker(0, args)
 
 
 if __name__ == "__main__":

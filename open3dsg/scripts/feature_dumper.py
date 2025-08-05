@@ -22,7 +22,7 @@ def inplace_relu(m):
 class MinimalSGPN(SGPN):
     """Lightweight wrapper exposing only the 2D encoders from :class:`SGPN`."""
 
-    def __init__(self, hparams, device: int = 0):
+    def __init__(self, hparams):
         # Skip heavy initialisation by avoiding ``SGPN.__init__``.
         torch.nn.Module.__init__(self)
         self.hparams = hparams
@@ -35,10 +35,28 @@ class MinimalSGPN(SGPN):
         self.BLIP = None
         self.LLaVA = None
         self.PROCESSOR = None
-        self.clip_device = torch.device(
-            f"cuda:{device}" if torch.cuda.is_available() else "cpu"
-        )
         self.blip_pos_encoding = None
+
+    @torch.no_grad()
+    def blip_encode_images(self, rel_imgs, batch_size: int = 32):
+        device = next(self.parameters()).device
+        rel_images_tensor = np.array(rel_imgs)
+        flat_imgs = rel_images_tensor.flatten().tolist()
+        rel_embeds = []
+        with torch.no_grad():
+            for i in range(0, len(flat_imgs), batch_size):
+                batch = flat_imgs[i : i + batch_size]
+                inputs = (
+                    self.PROCESSOR(images=batch, text=None, return_tensors="pt")
+                    .to(device)
+                )
+                rel_embeds.append(self.BLIP.embedd_image(inputs["pixel_values"]))
+                torch.cuda.empty_cache()
+
+        rel_embeds = torch.cat(rel_embeds, dim=0).view(
+            (*rel_images_tensor.shape, 257, 1408)
+        )
+        return rel_embeds
 
 
 class FeatureDumper:
@@ -48,8 +66,9 @@ class FeatureDumper:
         self.hparams = hparams
         self.hparams.setdefault("load_features", False)
         self.hparams.setdefault("test", False)
+        self.device_index = device
         # Only keep lightweight 2D encoders.
-        self.model = MinimalSGPN(self.hparams, device=device)
+        self.model = MinimalSGPN(self.hparams)
 
         # default path for dumping node features when stage == 'nodes'
         self.clip_path = os.path.join(
@@ -85,17 +104,15 @@ class FeatureDumper:
         elif self.hparams.get('llava'):
             self.model.load_pretrained_llava_model()
 
-        device = (
-            self.model.clip_device if torch.cuda.is_available() else torch.device("cpu")
+        device = torch.device(
+            f"cuda:{self.device_index}" if torch.cuda.is_available() else "cpu"
         )
         self.model.to(device)
 
     def encode_features(self, data_dict):
         """Populate ``clip_obj_encoding`` and ``clip_rel_encoding`` using 2D encoders."""
 
-        device = (
-            self.model.clip_device if torch.cuda.is_available() else torch.device("cpu")
-        )
+        device = next(self.model.parameters()).device
 
         obj_imgs = data_dict.get('object_imgs')
         rel_imgs = data_dict.get('relationship_imgs')
