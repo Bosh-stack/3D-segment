@@ -60,9 +60,7 @@ def _compute_node_features(args):
             batch["object_imgs"] = batch["object_imgs"].cuda(non_blocking=True)
         with torch.no_grad():
             batch = dumper.encode_features(batch)
-            emb_dim = batch["clip_obj_encoding"].shape[-1]
             bsz = batch["clip_obj_encoding"].shape[0]
-            batch["clip_rel_encoding"] = torch.zeros(bsz, args.max_edges, emb_dim, device=batch["clip_obj_encoding"].device)
             dumper._dump_features(batch, bsz, path=feature_dir)
         del batch
         gc.collect()
