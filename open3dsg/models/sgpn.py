@@ -171,13 +171,12 @@ class SGPN(nn.Module):
 
     def load_pretrained_clip_model(self, target_model, model):
 
-        if self.hparams['load_features'] and not self.hparams['test']:
+        if self.hparams.get("load_features") and not self.hparams.get("test", False):
             if torch.distributed.is_initialized():
                 torch.distributed.barrier()
                 clip_model, _ = clip.load('ViT-B/32', device=torch.distributed.get_rank())
                 self.clip_device = torch.device(torch.distributed.get_rank())
             else:
-                torch.distributed.barrier()
                 clip_model, _ = clip.load('ViT-B/32', device='cuda')
                 self.clip_device = "cuda"
             return clip_model
