@@ -4,7 +4,8 @@ import os
 import gc
 
 import torch
-from torch.utils.data import DataLoader
+import torch.distributed as dist
+from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
 from open3dsg.config.config import CONF
@@ -40,7 +41,7 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
     )
 
 
-def _compute_node_features(args):
+def _compute_node_features(args, local_rank):
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -50,10 +51,18 @@ def _compute_node_features(args):
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
     }
-    dumper = FeatureDumper(hparams)
+    dumper = FeatureDumper(hparams, device=local_rank)
     dumper.setup()
+    if dist.is_initialized():
+        dumper.model = torch.nn.parallel.DistributedDataParallel(
+            dumper.model, device_ids=[local_rank]
+        )
     dataset = _build_dataset(args, skip_edge_features=True)
-    loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
+    sampler = DistributedSampler(dataset, shuffle=False) if dist.is_initialized() else None
+    if sampler is not None:
+        loader = DataLoader(dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn)
+    else:
+        loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
     feature_dir = args.out_dir or dumper.clip_path
     for batch in tqdm(loader, desc="Nodes"):
         if torch.cuda.is_available() and "object_imgs" in batch:
@@ -73,7 +82,7 @@ def _compute_node_features(args):
     return feature_dir
 
 
-def _compute_edge_features(args, feature_dir):
+def _compute_edge_features(args, feature_dir, local_rank):
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -84,12 +93,20 @@ def _compute_edge_features(args, feature_dir):
         "max_edges": args.max_edges,
         "blip": True,
     }
-    dumper = FeatureDumper(hparams)
+    dumper = FeatureDumper(hparams, device=local_rank)
     dumper.setup()
+    if dist.is_initialized():
+        dumper.model = torch.nn.parallel.DistributedDataParallel(
+            dumper.model, device_ids=[local_rank]
+        )
     dataset = _build_dataset(
         args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True
     )
-    loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
+    sampler = DistributedSampler(dataset, shuffle=False) if dist.is_initialized() else None
+    if sampler is not None:
+        loader = DataLoader(dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn)
+    else:
+        loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
     for batch in tqdm(loader, desc="Edges"):
         if torch.cuda.is_available() and "relationship_imgs" in batch and torch.is_tensor(batch["relationship_imgs"]):
             batch["relationship_imgs"] = batch["relationship_imgs"].cuda(non_blocking=True)
@@ -119,14 +136,21 @@ def _parse_args():
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
     parser.add_argument("--out_dir", default=None, help="directory to store features")
+    parser.add_argument(
+        "--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", 0))
+    )
     args = parser.parse_args()
     return args
 
 
 def main():
     args = _parse_args()
-    feature_dir = _compute_node_features(args)
-    _compute_edge_features(args, feature_dir)
+    local_rank = args.local_rank
+    dist.init_process_group("nccl")
+    torch.cuda.set_device(local_rank)
+    feature_dir = _compute_node_features(args, local_rank)
+    _compute_edge_features(args, feature_dir, local_rank)
+    dist.barrier()
 
 
 if __name__ == "__main__":
