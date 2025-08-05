@@ -44,6 +44,8 @@ class FeatureDumper:
 
     def __init__(self, hparams):
         self.hparams = hparams
+        self.hparams.setdefault("load_features", False)
+        self.hparams.setdefault("test", False)
         # Only keep lightweight 2D encoders.
         self.model = MinimalSGPN(self.hparams)
 
