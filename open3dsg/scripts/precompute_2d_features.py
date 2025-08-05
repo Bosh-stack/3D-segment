@@ -20,17 +20,12 @@ def _load_relationships(dataset: str):
 
 def _build_dataset(args, load_features=None, skip_edge_features=False, load_node_features_only=False):
     relationships = _load_relationships(args.dataset)
-    if args.clip_model == "OpenSeg":
-        img_dim = 336 if args.node_model == "ViT-L/14@336px" else 224
-    else:
-        img_dim = 336 if args.clip_model == "ViT-L/14@336px" else 224
+    img_dim = 336 if args.node_model == "ViT-L/14@336px" else 224
     rel_img_dim = img_dim
-    if args.edge_model:
-        rel_img_dim = 336 if args.edge_model == "ViT-L/14@336px" else 224
     return Open2D3DSGDataset(
         relationships_R3SCAN=None,
         relationships_scannet=relationships,
-        openseg=args.clip_model == "OpenSeg",
+        openseg=True,
         img_dim=img_dim,
         rel_img_dim=rel_img_dim,
         top_k_frames=args.top_k_frames,
@@ -38,8 +33,8 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
         max_objects=args.max_nodes,
         max_rels=args.max_edges,
         load_features=load_features,
-        blip=args.blip,
-        llava=args.llava,
+        blip=True,
+        llava=False,
         skip_edge_features=skip_edge_features,
         load_node_features_only=load_node_features_only,
     )
@@ -47,8 +42,8 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
 
 def _compute_node_features(args):
     hparams = {
-        "clip_model": args.clip_model,
-        "node_model": args.node_model,
+        "clip_model": "OpenSeg",
+        "node_model": "ViT-L/14@336px",
         "edge_model": None,
         "dump_features": True,
         "skip_edge_features": True,
@@ -81,19 +76,15 @@ def _compute_node_features(args):
 
 
 def _compute_edge_features(args, feature_dir):
-    edge_model = args.edge_model or args.clip_model
-    if args.blip:
-        edge_model = None
     hparams = {
-        "clip_model": args.clip_model,
-        "node_model": args.node_model,
-        "edge_model": edge_model,
+        "clip_model": "OpenSeg",
+        "node_model": "ViT-L/14@336px",
+        "edge_model": None,
         "dump_features": True,
         "skip_edge_features": False,
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
-        "blip": args.blip,
-        "llava": args.llava,
+        "blip": True,
     }
     dumper = FeatureDumper(hparams)
     dumper.setup()
@@ -123,17 +114,15 @@ def _compute_edge_features(args, feature_dir):
 def _parse_args():
     parser = argparse.ArgumentParser(description="Precompute 2D features in two sequential stages")
     parser.add_argument("--dataset", default="scannet")
-    parser.add_argument("--clip_model", default="ViT-B/32")
-    parser.add_argument("--node_model", default=None)
-    parser.add_argument("--edge_model", default=None)
+    parser.add_argument("--clip_model", choices=["OpenSeg"], default="OpenSeg")
+    parser.add_argument("--node_model", default="ViT-L/14@336px")
     parser.add_argument("--top_k_frames", type=int, default=5)
     parser.add_argument("--scales", type=int, default=3)
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
-    parser.add_argument("--blip", action="store_true")
-    parser.add_argument("--llava", action="store_true")
     parser.add_argument("--out_dir", default=None, help="directory to store features")
-    return parser.parse_args()
+    args = parser.parse_args()
+    return args
 
 
 def main():
