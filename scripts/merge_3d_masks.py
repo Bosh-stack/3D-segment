@@ -12,9 +12,10 @@ Two usage modes are supported:
   this mode every point with matching instance id is extracted from the scene
   mask.  No confidence scores are available so both masks are treated equally.
 
-For every pair of overlapping pixels in the chosen RGB frame the point from the
-mask with the *lower* score is dropped.  The remaining points are written to the
-output ``.ply`` file.
+For every pair of overlapping pixels in an RGB frame the point from the mask
+with the *lower* score is dropped.  If ``--image-idx`` is not supplied the
+script picks the frame where the two masks have the highest combined visibility.
+The remaining points are written to the output ``.ply`` file.
 """
 
 import argparse
@@ -97,6 +98,15 @@ def merge_pcs(pc_a, pc_b, score_a, score_b, K, T, width, height):
     return merged
 
 
+def _visible_count(pc: o3d.geometry.PointCloud, K, T, w, h):
+    uv, mask = _project(np.asarray(pc.points), K, T)
+    if uv.size == 0:
+        return 0
+    x_valid = (uv[:, 0] >= 0) & (uv[:, 0] < w)
+    y_valid = (uv[:, 1] >= 0) & (uv[:, 1] < h)
+    return int((x_valid & y_valid).sum())
+
+
 def main():
     p = argparse.ArgumentParser(description="Merge two 3D masks")
     p.add_argument("scan_dir", type=Path, help="path to scan directory")
@@ -106,7 +116,11 @@ def main():
     src.add_argument("--scene", type=Path, help="path to scene-wide vis_pred.ply")
     p.add_argument("--inst-a", type=int, help="instance id A when using --scene")
     p.add_argument("--inst-b", type=int, help="instance id B when using --scene")
-    p.add_argument("--image-idx", type=int, default=0, help="RGB frame used for projection")
+    p.add_argument(
+        "--image-idx",
+        type=int,
+        help="RGB frame to use; if omitted the best visible frame is selected",
+    )
     args = p.parse_args()
 
     if args.inst:
@@ -123,8 +137,25 @@ def main():
         pc_b = _load_instance_from_scene(scene_pc, args.inst_b)
         score_a = score_b = 0.0
 
-    meta = args.scan_dir / f"im_metadata_{args.image_idx}.json"
-    K, T, w, h = load_cam(meta)
+    if args.image_idx is not None:
+        meta = args.scan_dir / f"im_metadata_{args.image_idx}.json"
+        K, T, w, h = load_cam(meta)
+    else:
+        best_idx = None
+        best_score = -1
+        for meta in sorted(args.scan_dir.glob("im_metadata_*.json")):
+            K, T, w, h = load_cam(meta)
+            score = _visible_count(pc_a, K, T, w, h) + _visible_count(
+                pc_b, K, T, w, h
+            )
+            if score > best_score:
+                best_idx = int(meta.stem.split("_")[-1])
+                best_score = score
+                best_cam = (K, T, w, h)
+        if best_idx is None:
+            raise RuntimeError("No camera metadata files found")
+        print(f"Selected frame {best_idx} with {best_score} visible points")
+        K, T, w, h = best_cam
 
     merged = merge_pcs(pc_a, pc_b, score_a, score_b, K, T, w, h)
     o3d.io.write_point_cloud(str(args.output), merged)
