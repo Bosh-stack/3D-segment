@@ -7,6 +7,10 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
+try:
+    import tensorflow as tf
+except ImportError:  # pragma: no cover - TensorFlow is optional
+    tf = None
 from tqdm import tqdm
 
 from open3dsg.config.config import CONF
@@ -151,6 +155,15 @@ def _parse_args():
 
 def main_worker(local_rank, args):
     torch.cuda.set_device(local_rank)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    if tf is not None:
+        physical_devices = tf.config.list_physical_devices("GPU")
+        if physical_devices:
+            try:
+                tf.config.set_visible_devices(physical_devices[0], "GPU")
+                tf.config.experimental.set_memory_growth(physical_devices[0], True)
+            except Exception:
+                pass
     if args.gpus > 1:
         dist.init_process_group(
             "nccl", init_method="tcp://127.0.0.1:29500", rank=local_rank, world_size=args.gpus
@@ -163,7 +176,7 @@ def main_worker(local_rank, args):
     _compute_edge_features(args, feature_dir, local_rank)
 
     if args.gpus > 1:
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
         dist.destroy_process_group()
 
 
