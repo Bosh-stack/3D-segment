@@ -4,14 +4,9 @@ import os
 import gc
 
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, DistributedSampler
-try:
-    import tensorflow as tf
-except ImportError:  # pragma: no cover - TensorFlow is optional
-    tf = None
 from tqdm import tqdm
+from lightning import Fabric
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
@@ -46,7 +41,7 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
     )
 
 
-def _compute_node_features(args, local_rank):
+def _compute_node_features(args, fabric: Fabric):
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -56,22 +51,21 @@ def _compute_node_features(args, local_rank):
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
     }
-    dumper = FeatureDumper(hparams, device=local_rank)
+    dumper = FeatureDumper(hparams, device=fabric.local_rank)
     dumper.setup()
-    if dist.is_initialized():
-        dumper.model = torch.nn.parallel.DistributedDataParallel(
-            dumper.model, device_ids=[local_rank]
-        )
     dataset = _build_dataset(args, skip_edge_features=True)
-    sampler = DistributedSampler(dataset, shuffle=False) if dist.is_initialized() else None
-    if sampler is not None:
-        loader = DataLoader(dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn)
-    else:
-        loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=fabric.world_size,
+        rank=fabric.global_rank,
+        shuffle=False,
+    )
+    loader = DataLoader(
+        dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
+    )
+    loader = fabric.setup_dataloaders(loader)
     feature_dir = args.out_dir or dumper.clip_path
     for batch in tqdm(loader, desc="Nodes"):
-        if torch.cuda.is_available() and "object_imgs" in batch:
-            batch["object_imgs"] = batch["object_imgs"].cuda(non_blocking=True)
         with torch.no_grad():
             batch = dumper.encode_features(batch)
             bsz = batch["clip_obj_encoding"].shape[0]
@@ -86,8 +80,7 @@ def _compute_node_features(args, local_rank):
         torch.cuda.empty_cache()
     return feature_dir
 
-
-def _compute_edge_features(args, feature_dir, local_rank):
+def _compute_edge_features(args, feature_dir, fabric: Fabric):
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -98,25 +91,22 @@ def _compute_edge_features(args, feature_dir, local_rank):
         "max_edges": args.max_edges,
         "blip": True,
     }
-    dumper = FeatureDumper(hparams, device=local_rank)
+    dumper = FeatureDumper(hparams, device=fabric.local_rank)
     dumper.setup()
-    if dist.is_initialized():
-        dumper.model = torch.nn.parallel.DistributedDataParallel(
-            dumper.model, device_ids=[local_rank]
-        )
     dataset = _build_dataset(
         args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True
     )
-    sampler = DistributedSampler(dataset, shuffle=False) if dist.is_initialized() else None
-    if sampler is not None:
-        loader = DataLoader(dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn)
-    else:
-        loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=dataset.collate_fn)
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=fabric.world_size,
+        rank=fabric.global_rank,
+        shuffle=False,
+    )
+    loader = DataLoader(
+        dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
+    )
+    loader = fabric.setup_dataloaders(loader)
     for batch in tqdm(loader, desc="Edges"):
-        if torch.cuda.is_available() and "relationship_imgs" in batch and torch.is_tensor(batch["relationship_imgs"]):
-            batch["relationship_imgs"] = batch["relationship_imgs"].cuda(non_blocking=True)
-        if torch.cuda.is_available() and "blip_images" in batch and torch.is_tensor(batch["blip_images"]):
-            batch["blip_images"] = batch["blip_images"].cuda(non_blocking=True)
         with torch.no_grad():
             batch = dumper.encode_features(batch)
             bsz = batch["clip_obj_encoding"].shape[0]
@@ -152,43 +142,19 @@ def _parse_args():
     args = parser.parse_args()
     return args
 
-
-def main_worker(local_rank, args):
-    torch.cuda.set_device(local_rank)
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
-    if tf is not None:
-        physical_devices = tf.config.list_physical_devices("GPU")
-        if physical_devices:
-            try:
-                tf.config.set_visible_devices(physical_devices[0], "GPU")
-                tf.config.experimental.set_memory_growth(physical_devices[0], True)
-            except Exception:
-                pass
-    if args.gpus > 1:
-        dist.init_process_group(
-            "nccl",
-            init_method="tcp://127.0.0.1:29500",
-            rank=local_rank,
-            world_size=args.gpus,
-        )
-    # Load precomputed node features if provided, otherwise compute them
+def main_worker(fabric: Fabric, args):
     if args.load_node_features:
         feature_dir = args.load_node_features
     else:
-        feature_dir = _compute_node_features(args, local_rank)
-    _compute_edge_features(args, feature_dir, local_rank)
-
-    if args.gpus > 1:
-        dist.barrier(device_ids=[local_rank])
-        dist.destroy_process_group()
+        feature_dir = _compute_node_features(args, fabric)
+    _compute_edge_features(args, feature_dir, fabric)
+    fabric.barrier()
 
 
 def main():
     args = _parse_args()
-    if args.gpus > 1:
-        mp.spawn(main_worker, nprocs=args.gpus, args=(args,))
-    else:
-        main_worker(0, args)
+    fabric = Fabric(accelerator="cuda", devices=args.gpus)
+    fabric.launch(main_worker, args)
 
 
 if __name__ == "__main__":
