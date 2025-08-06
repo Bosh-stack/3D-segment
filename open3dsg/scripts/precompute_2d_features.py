@@ -154,14 +154,14 @@ def _parse_args():
 
 
 def main_worker(local_rank, args):
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     torch.cuda.set_device(local_rank)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     if tf is not None:
         physical_devices = tf.config.list_physical_devices("GPU")
-        if len(physical_devices) > local_rank:
+        if physical_devices:
             try:
-                tf.config.set_visible_devices(physical_devices[local_rank], "GPU")
-                tf.config.experimental.set_memory_growth(physical_devices[local_rank], True)
+                tf.config.set_visible_devices(physical_devices[0], "GPU")
+                tf.config.experimental.set_memory_growth(physical_devices[0], True)
             except Exception:
                 pass
     if args.gpus > 1:
