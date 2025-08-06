@@ -134,8 +134,16 @@ class FeatureDumper:
         if rel_imgs is not None and torch.is_tensor(rel_imgs):
             rel_imgs = rel_imgs.to(device)
 
-        if (rel_imgs is None or (isinstance(rel_imgs, list) and len(rel_imgs) == 0)) and self.hparams.get('blip'):
+        def _rel_imgs_empty(imgs):
+            return imgs is None or (
+                isinstance(imgs, list)
+                and (not imgs or sum(len(r) for r in imgs) == 0)
+            )
+
+        if self.hparams.get('blip') and _rel_imgs_empty(rel_imgs):
             rel_imgs = data_dict.get('blip_images')
+
+        rel_imgs_empty = _rel_imgs_empty(rel_imgs)
 
         clip_rel_feats = None
 
@@ -168,10 +176,16 @@ class FeatureDumper:
             )
             _, clip_rel_feats = model.clip_encode_imgs(dummy, rel_imgs)
 
-        if self.hparams.get('blip') and rel_imgs is not None:
-            data_dict['clip_rel_encoding'] = model.blip_encode_images(
-                rel_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
-            )
+        if self.hparams.get('blip'):
+            if rel_imgs is not None and not rel_imgs_empty:
+                data_dict['clip_rel_encoding'] = model.blip_encode_images(
+                    rel_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
+                )
+            else:
+                num_frames = self.hparams.get('top_k_frames', 1) * self.hparams.get('scales', 1)
+                data_dict['clip_rel_encoding'] = torch.empty(
+                    (0, num_frames, 257, 1408), device=device
+                )
         elif self.hparams.get('llava') and rel_imgs is not None:
             data_dict['clip_rel_encoding'] = model.llava_encode_images(rel_imgs)
         elif clip_rel_feats is not None:
