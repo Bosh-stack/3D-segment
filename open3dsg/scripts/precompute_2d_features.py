@@ -41,47 +41,73 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
     )
 
 
-def _compute_node_features(args, fabric: Fabric):
-    hparams = {
-        "clip_model": "OpenSeg",
-        "node_model": "ViT-L/14@336px",
-        "edge_model": None,
-        "dump_features": True,
-        "skip_edge_features": True,
-        "max_nodes": args.max_nodes,
-        "max_edges": args.max_edges,
-    }
-    dumper = FeatureDumper(hparams, device=fabric.local_rank)
-    dumper.setup()
-    dataset = _build_dataset(args, skip_edge_features=True)
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=fabric.world_size,
-        rank=fabric.global_rank,
-        shuffle=False,
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Precompute 2D features in two sequential stages. Optionally load precomputed node features."
     )
-    loader = DataLoader(
-        dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
+    parser.add_argument("--dataset", default="scannet")
+    parser.add_argument("--clip_model", choices=["OpenSeg"], default="OpenSeg")
+    parser.add_argument("--node_model", default="ViT-L/14@336px")
+    parser.add_argument("--top_k_frames", type=int, default=5)
+    parser.add_argument("--scales", type=int, default=3)
+    parser.add_argument("--max_nodes", type=int, default=1000)
+    parser.add_argument("--max_edges", type=int, default=2000)
+    parser.add_argument("--out_dir", default=None, help="directory to store features")
+    parser.add_argument(
+        "--load_node_features",
+        default=None,
+        help="directory containing precomputed node features; if provided, node feature computation is skipped",
     )
-    loader = fabric.setup_dataloaders(loader)
-    feature_dir = args.out_dir or dumper.clip_path
-    for batch in tqdm(loader, desc="Nodes"):
-        with torch.no_grad():
-            batch = dumper.encode_features(batch)
-            bsz = batch["clip_obj_encoding"].shape[0]
-            dumper._dump_features(batch, bsz, path=feature_dir)
-        del batch
+    parser.add_argument("--gpus", type=int, default=torch.cuda.device_count())
+    args = parser.parse_args()
+    return args
+
+def main_worker(fabric: Fabric, args):
+    # Stage 1: compute node features unless provided
+    if args.load_node_features:
+        feature_dir = args.load_node_features
+    else:
+        node_hparams = {
+            "clip_model": "OpenSeg",
+            "node_model": "ViT-L/14@336px",
+            "edge_model": None,
+            "dump_features": True,
+            "skip_edge_features": True,
+            "max_nodes": args.max_nodes,
+            "max_edges": args.max_edges,
+        }
+        dumper = FeatureDumper(node_hparams, device=fabric.local_rank)
+        dumper.setup()
+        dataset = _build_dataset(args, skip_edge_features=True)
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=fabric.world_size,
+            rank=fabric.global_rank,
+            shuffle=False,
+        )
+        loader = DataLoader(
+            dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
+        )
+        loader = fabric.setup_dataloaders(loader)
+        feature_dir = args.out_dir or dumper.clip_path
+        for batch in tqdm(loader, desc="Nodes"):
+            with torch.no_grad():
+                batch = dumper.encode_features(batch)
+                bsz = batch["clip_obj_encoding"].shape[0]
+                dumper._dump_features(batch, bsz, path=feature_dir)
+            del batch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        del loader, dataset, dumper
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    del loader, dataset, dumper
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    return feature_dir
 
-def _compute_edge_features(args, feature_dir, fabric: Fabric):
-    hparams = {
+    # Stage 2: compute edge features
+    edge_hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
         "edge_model": None,
@@ -91,7 +117,7 @@ def _compute_edge_features(args, feature_dir, fabric: Fabric):
         "max_edges": args.max_edges,
         "blip": True,
     }
-    dumper = FeatureDumper(hparams, device=fabric.local_rank)
+    dumper = FeatureDumper(edge_hparams, device=fabric.local_rank)
     dumper.setup()
     dataset = _build_dataset(
         args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True
@@ -120,34 +146,6 @@ def _compute_edge_features(args, feature_dir, fabric: Fabric):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-
-def _parse_args():
-    parser = argparse.ArgumentParser(
-        description="Precompute 2D features in two sequential stages. Optionally load precomputed node features."
-    )
-    parser.add_argument("--dataset", default="scannet")
-    parser.add_argument("--clip_model", choices=["OpenSeg"], default="OpenSeg")
-    parser.add_argument("--node_model", default="ViT-L/14@336px")
-    parser.add_argument("--top_k_frames", type=int, default=5)
-    parser.add_argument("--scales", type=int, default=3)
-    parser.add_argument("--max_nodes", type=int, default=1000)
-    parser.add_argument("--max_edges", type=int, default=2000)
-    parser.add_argument("--out_dir", default=None, help="directory to store features")
-    parser.add_argument(
-        "--load_node_features",
-        default=None,
-        help="directory containing precomputed node features; if provided, node feature computation is skipped",
-    )
-    parser.add_argument("--gpus", type=int, default=torch.cuda.device_count())
-    args = parser.parse_args()
-    return args
-
-def main_worker(fabric: Fabric, args):
-    if args.load_node_features:
-        feature_dir = args.load_node_features
-    else:
-        feature_dir = _compute_node_features(args, fabric)
-    _compute_edge_features(args, feature_dir, fabric)
     fabric.barrier()
 
 
