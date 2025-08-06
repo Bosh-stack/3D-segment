@@ -150,7 +150,12 @@ def _parse_args():
 
 
 def main_worker(local_rank, args):
-    torch.cuda.set_device(local_rank)
+    # Avoid setting the device based on the spawned process index. This
+    # prevents "invalid device" errors in environments where fewer GPUs are
+    # available than requested. Each model instance will still be created on
+    # the correct device via the `device` argument passed to the `FeatureDumper`.
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
     if args.gpus > 1:
         dist.init_process_group(
             "nccl", init_method="tcp://127.0.0.1:29500", rank=local_rank, world_size=args.gpus
