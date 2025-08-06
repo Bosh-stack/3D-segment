@@ -3,10 +3,11 @@
 
 """Dump CLIP features in two stages.
 
-Run with ``torchrun`` so that one process is spawned per GPU::
+This script spawns one worker per available GPU using
+``torch.multiprocessing.spawn``. Simply run:
 
-    torchrun --nproc_per_node=<NGPUS> open3dsg/scripts/dump_features_two_step.py --stage nodes ...
-    torchrun --nproc_per_node=<NGPUS> open3dsg/scripts/dump_features_two_step.py --stage edges --load_node_features <dir> ...
+    python open3dsg/scripts/dump_features_two_step.py --stage nodes ...
+    python open3dsg/scripts/dump_features_two_step.py --stage edges --load_node_features <dir> ...
 """
 
 import argparse
@@ -19,10 +20,13 @@ import gc
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
+
+import shutil
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
@@ -158,74 +162,55 @@ def build_dataset(args, load_features, skip_edge_features, load_node_features_on
     )
     return dataset
 
-
-def main():
-    args = get_args()
-
-    # Distributed setup
-    # Determine rank and world size from environment, defaulting to a
-    # single-process run when not provided.
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-    else:
-        rank = 0
-        world_size = 1
-
-    # Use a TCP init method when initializing manually. The address is only
-    # relevant when more than one process is used.
-    init_method = "tcp://127.0.0.1:29500"
-
+def worker(rank, world_size, args):
+    if torch.cuda.is_available():
+        torch.cuda.set_device(rank)
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
     if world_size > 1:
-        if torch.cuda.is_available():
-            local_rank = int(os.environ.get("LOCAL_RANK", 0))
-            torch.cuda.set_device(local_rank)
-            dist.init_process_group(
-                "nccl", init_method=init_method, rank=rank, world_size=world_size
-            )
-        else:
-            local_rank = 0
-            dist.init_process_group(
-                "gloo", init_method=init_method, rank=rank, world_size=world_size
-            )
-    else:
-        # Single-process case: avoid initializing torch.distributed.
-        local_rank = 0
+        dist.init_process_group(
+            backend, init_method="tcp://127.0.0.1:29500", rank=rank, world_size=world_size
+        )
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
+    torch.manual_seed(args.seed + rank)
+    np.random.seed(args.seed + rank)
+    random.seed(args.seed + rank)
 
     hparams = vars(args).copy()
-    hparams['dump_features'] = True
-    hparams['load_features'] = None
-
-    if args.stage == 'nodes':
-        hparams['skip_edge_features'] = True
+    hparams["dump_features"] = True
+    hparams["load_features"] = None
+    if args.stage == "nodes":
+        hparams["skip_edge_features"] = True
     else:
-        hparams['skip_edge_features'] = False
-        hparams['load_node_features_only'] = True
+        hparams["skip_edge_features"] = False
+        hparams["load_node_features_only"] = True
 
-    module = FeatureDumper(hparams)
+    module = FeatureDumper(hparams, device=rank)
+    module.clip_path = args.base_feature_dir
     module.setup()
-    device = torch.device(local_rank) if torch.cuda.is_available() else torch.device("cpu")
-    module.model.to(device)
+    device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
     if world_size > 1:
         module.model = DDP(
-            module.model, device_ids=[local_rank] if torch.cuda.is_available() else None
+            module.model, device_ids=[rank] if torch.cuda.is_available() else None
         )
     module.model.eval()
 
-    if args.stage == 'nodes':
+    if args.stage == "nodes":
         dataset = build_dataset(args, None, True)
-        feature_dir = module.clip_path
     else:
-        if args.load_node_features is None:
-            raise ValueError("--load_node_features required for edges stage")
-        dataset = build_dataset(args, args.load_node_features, False, load_node_features_only=True)
-        feature_dir = args.load_node_features
+        dataset = build_dataset(
+            args, args.base_feature_dir, False, load_node_features_only=True
+        )
 
-    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False)
+    feature_dir = (
+        args.base_feature_dir
+        if world_size == 1
+        else os.path.join(args.base_feature_dir, f"rank{rank}")
+    )
+    os.makedirs(feature_dir, exist_ok=True)
+
+    sampler = DistributedSampler(
+        dataset, num_replicas=world_size, rank=rank, shuffle=False
+    )
     dataloader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -236,36 +221,70 @@ def main():
 
     if rank == 0:
         pbar = tqdm(total=len(sampler), desc="Processing scenes")
-    for data_dict in dataloader:
-        # Move only image tensors to the GPU; keep the rest on CPU to save memory
-        if 'object_imgs' in data_dict:
-            data_dict['object_imgs'] = data_dict['object_imgs'].to(device)
-        if 'relationship_imgs' in data_dict:
-            data_dict['relationship_imgs'] = data_dict['relationship_imgs'].to(device)
-        if 'blip_images' in data_dict:
-            data_dict['blip_images'] = data_dict['blip_images'].to(device)
+    with torch.no_grad():
+        for data_dict in dataloader:
+            if "object_imgs" in data_dict:
+                data_dict["object_imgs"] = data_dict["object_imgs"].to(device)
+            if "relationship_imgs" in data_dict:
+                data_dict["relationship_imgs"] = data_dict["relationship_imgs"].to(device)
+            if "blip_images" in data_dict:
+                data_dict["blip_images"] = data_dict["blip_images"].to(device)
 
-        data_dict = module.encode_features(data_dict)
+            data_dict = module.encode_features(data_dict)
 
-        module._dump_features(data_dict, data_dict['objects_id'].size(0), path=feature_dir)
-        if rank == 0:
-            pbar.update(len(data_dict.get('scan_id', [])))
+            module._dump_features(
+                data_dict, data_dict["objects_id"].size(0), path=feature_dir
+            )
+            if rank == 0:
+                pbar.update(len(data_dict.get("scan_id", [])))
 
-        # Free GPU and CPU memory after processing each scene
-        del data_dict
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            del data_dict
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     if rank == 0:
         pbar.close()
 
     if world_size > 1:
         dist.barrier()
-    if rank == 0:
-        print(f"Features saved to {feature_dir}")
-    if world_size > 1:
         dist.destroy_process_group()
+
+
+def main():
+    args = get_args()
+    world_size = args.gpus if args.gpus > 0 else torch.cuda.device_count()
+    world_size = max(1, world_size)
+
+    if args.stage == "nodes":
+        base_dir = os.path.join(
+            CONF.PATH.FEATURES,
+            f"clip_features_{datetime.now().strftime('%Y-%m-%d-%H-%M')}",
+        )
+    else:
+        if args.load_node_features is None:
+            raise ValueError("--load_node_features required for edges stage")
+        base_dir = args.load_node_features
+
+    args.base_feature_dir = base_dir
+
+    if world_size > 1:
+        mp.spawn(worker, nprocs=world_size, args=(world_size, args))
+        for r in range(world_size):
+            rank_dir = os.path.join(base_dir, f"rank{r}")
+            if not os.path.isdir(rank_dir):
+                continue
+            for sub in os.listdir(rank_dir):
+                src = os.path.join(rank_dir, sub)
+                dst = os.path.join(base_dir, sub)
+                os.makedirs(dst, exist_ok=True)
+                for fname in os.listdir(src):
+                    shutil.move(os.path.join(src, fname), os.path.join(dst, fname))
+            shutil.rmtree(rank_dir)
+    else:
+        worker(0, 1, args)
+
+    print(f"Features saved to {base_dir}")
 
 
 if __name__ == "__main__":
