@@ -128,7 +128,9 @@ def _compute_edge_features(args, feature_dir, local_rank):
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Precompute 2D features in two sequential stages")
+    parser = argparse.ArgumentParser(
+        description="Precompute 2D features in two sequential stages. Optionally load precomputed node features."
+    )
     parser.add_argument("--dataset", default="scannet")
     parser.add_argument("--clip_model", choices=["OpenSeg"], default="OpenSeg")
     parser.add_argument("--node_model", default="ViT-L/14@336px")
@@ -137,6 +139,11 @@ def _parse_args():
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
     parser.add_argument("--out_dir", default=None, help="directory to store features")
+    parser.add_argument(
+        "--load_node_features",
+        default=None,
+        help="directory containing precomputed node features; if provided, node feature computation is skipped",
+    )
     parser.add_argument("--gpus", type=int, default=torch.cuda.device_count())
     args = parser.parse_args()
     return args
@@ -148,8 +155,11 @@ def main_worker(local_rank, args):
         dist.init_process_group(
             "nccl", init_method="tcp://127.0.0.1:29500", rank=local_rank, world_size=args.gpus
         )
-
-    feature_dir = _compute_node_features(args, local_rank)
+    # Load precomputed node features if provided, otherwise compute them
+    if args.load_node_features:
+        feature_dir = args.load_node_features
+    else:
+        feature_dir = _compute_node_features(args, local_rank)
     _compute_edge_features(args, feature_dir, local_rank)
 
     if args.gpus > 1:
