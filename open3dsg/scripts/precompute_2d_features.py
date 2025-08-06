@@ -105,6 +105,9 @@ def main_worker(fabric: Fabric, args):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    fabric.barrier()
 
     # Stage 2: compute edge features
     edge_hparams = {
