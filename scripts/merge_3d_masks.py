@@ -142,6 +142,12 @@ def main():
         type=int,
         help="RGB frame to use; if omitted the best visible frame is selected",
     )
+    p.add_argument(
+        "--max-dist",
+        type=float,
+        default=1.0,
+        help="maximum centroid-to-centroid distance allowed for merging",
+    )
     args = p.parse_args()
 
     if args.inst:
@@ -157,6 +163,15 @@ def main():
         pc_a = _load_instance_from_scene(scene_pc, args.inst_a)
         pc_b = _load_instance_from_scene(scene_pc, args.inst_b)
         score_a = score_b = 0.0
+
+    center_a = np.asarray(pc_a.get_center())
+    center_b = np.asarray(pc_b.get_center())
+    dist = np.linalg.norm(center_a - center_b)
+    if dist > args.max_dist:
+        print(
+            f"Skipping merge; pair distance {dist:.2f} exceeds threshold {args.max_dist:.2f}"
+        )
+        return
 
     if args.image_idx is not None:
         meta = args.scan_dir / f"im_metadata_{args.image_idx}.json"

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Visualise original and merged point clouds side by side."""
+"""Visualise original and merged point clouds side by side.
+
+Only mask pairs that are sufficiently proximal (as determined by
+``merge_3d_masks.py``'s distance threshold) are merged."""
 
 import argparse
 from pathlib import Path
