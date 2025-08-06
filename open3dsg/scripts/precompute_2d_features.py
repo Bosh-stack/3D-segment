@@ -15,7 +15,6 @@ from tqdm import tqdm
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
-from open3dsg.scripts.feature_dumper import FeatureDumper
 
 
 def _load_relationships(dataset: str):
@@ -47,6 +46,8 @@ def _build_dataset(args, load_features=None, skip_edge_features=False, load_node
 
 
 def _compute_node_features(args, local_rank):
+    from open3dsg.scripts.feature_dumper import FeatureDumper
+
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -88,6 +89,8 @@ def _compute_node_features(args, local_rank):
 
 
 def _compute_edge_features(args, feature_dir, local_rank):
+    from open3dsg.scripts.feature_dumper import FeatureDumper
+
     hparams = {
         "clip_model": "OpenSeg",
         "node_model": "ViT-L/14@336px",
@@ -154,6 +157,9 @@ def _parse_args():
 
 
 def main_worker(local_rank, args):
+    os.environ["LOCAL_RANK"] = str(local_rank)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+
     torch.cuda.set_device(local_rank)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     if tf is not None:
