@@ -197,18 +197,23 @@ class FeatureDumper:
         obj_valids = None
         clip_rel_emb_masked = None
         if isinstance(clip_obj_emb, torch.Tensor):
-            if self.hparams['clip_model'] == 'OpenSeg':
-                clip_obj2frame_mask = data_dict['obj2frame_raw_mask'][bidx][:obj_count]
-            else:
-                clip_obj2frame_mask = data_dict['obj2frame_mask'][bidx][:obj_count]
-
-            clip_obj_mask = (
-                torch.arange(clip_obj_emb.size(1)).unsqueeze(0).to(clip_obj2frame_mask.device)
-                < clip_obj2frame_mask.unsqueeze(1)
+            mask_key = (
+                'obj2frame_raw_mask' if self.hparams['clip_model'] == 'OpenSeg' else 'obj2frame_mask'
             )
-            clip_obj_emb[~clip_obj_mask] = np.nan
-            clip_obj_emb = torch.nanmean(clip_obj_emb, dim=1)
-            obj_valids = ~torch.isnan(clip_obj_emb).all(-1)
+            has_mask = mask_key in data_dict
+            has_frame_dim = clip_obj_emb.dim() > 2
+
+            if has_mask and has_frame_dim:
+                clip_obj2frame_mask = data_dict[mask_key][bidx][:obj_count]
+                clip_obj_mask = (
+                    torch.arange(clip_obj_emb.size(1)).unsqueeze(0).to(clip_obj2frame_mask.device)
+                    < clip_obj2frame_mask.unsqueeze(1)
+                )
+                clip_obj_emb[~clip_obj_mask] = np.nan
+                clip_obj_emb = torch.nanmean(clip_obj_emb, dim=1)
+                obj_valids = ~torch.isnan(clip_obj_emb).all(-1)
+            else:
+                obj_valids = ~torch.isnan(clip_obj_emb).all(-1)
 
         if isinstance(clip_rel_emb, torch.Tensor):
             clip_rel2frame_mask = data_dict['rel2frame_mask'][bidx][:rel_count]
