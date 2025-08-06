@@ -170,7 +170,6 @@ def main_worker(local_rank, args):
             init_method="tcp://127.0.0.1:29500",
             rank=local_rank,
             world_size=args.gpus,
-            device_id=local_rank,
         )
     # Load precomputed node features if provided, otherwise compute them
     if args.load_node_features:
