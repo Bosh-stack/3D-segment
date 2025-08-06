@@ -19,6 +19,7 @@ The remaining points are written to the output ``.ply`` file.
 """
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -26,6 +27,19 @@ import numpy as np
 import open3d as o3d
 
 from open3dsg.data.get_object_frame_myset import load_cam
+
+
+LOG_PATH = Path(__file__).resolve().parent / "visibility_log.json"
+
+
+def _load_log():
+    if LOG_PATH.exists():
+        return json.loads(LOG_PATH.read_text())
+    return {}
+
+
+def _save_log(cache):
+    LOG_PATH.write_text(json.dumps(cache, indent=2))
 
 
 def _project(points: np.ndarray, K: np.ndarray, T: np.ndarray):
@@ -107,6 +121,13 @@ def _visible_count(pc: o3d.geometry.PointCloud, K, T, w, h):
     return int((x_valid & y_valid).sum())
 
 
+def _cache_key(args) -> str:
+    if args.inst:
+        a, b = args.inst
+        return f"{args.scan_dir.resolve()}|{a}|{b}"
+    return f"{args.scan_dir.resolve()}|{args.scene}|{args.inst_a}|{args.inst_b}"
+
+
 def main():
     p = argparse.ArgumentParser(description="Merge two 3D masks")
     p.add_argument("scan_dir", type=Path, help="path to scan directory")
@@ -141,21 +162,35 @@ def main():
         meta = args.scan_dir / f"im_metadata_{args.image_idx}.json"
         K, T, w, h = load_cam(meta)
     else:
-        best_idx = None
-        best_score = -1
-        for meta in sorted(args.scan_dir.glob("im_metadata_*.json")):
-            K, T, w, h = load_cam(meta)
-            score = _visible_count(pc_a, K, T, w, h) + _visible_count(
-                pc_b, K, T, w, h
+        cache = _load_log()
+        key = _cache_key(args)
+        if key in cache:
+            meta = Path(cache[key]["meta"])
+            best_score = cache[key]["score"]
+            print(
+                f"Loaded frame {meta} with {best_score} visible points from log"
             )
-            if score > best_score:
-                best_idx = int(meta.stem.split("_")[-1])
-                best_score = score
-                best_cam = (K, T, w, h)
-        if best_idx is None:
-            raise RuntimeError("No camera metadata files found")
-        print(f"Selected frame {best_idx} with {best_score} visible points")
-        K, T, w, h = best_cam
+            K, T, w, h = load_cam(meta)
+        else:
+            best_meta = None
+            best_score = -1
+            for meta in sorted(args.scan_dir.glob("im_metadata_*.json")):
+                K, T, w, h = load_cam(meta)
+                score = _visible_count(pc_a, K, T, w, h) + _visible_count(
+                    pc_b, K, T, w, h
+                )
+                if score > best_score:
+                    best_meta = meta
+                    best_score = score
+                    best_cam = (K, T, w, h)
+            if best_meta is None:
+                raise RuntimeError("No camera metadata files found")
+            print(
+                f"Selected frame {best_meta} with {best_score} visible points"
+            )
+            K, T, w, h = best_cam
+            cache[key] = {"meta": str(best_meta), "score": best_score}
+            _save_log(cache)
 
     merged = merge_pcs(pc_a, pc_b, score_a, score_b, K, T, w, h)
     o3d.io.write_point_cloud(str(args.output), merged)
