@@ -10,6 +10,7 @@ open_clip_torch
 graphviz
 plyfile
 pytorch-lightning==2.1.1
+lightning
 scipy
 setuptools
 tensorflow==2.12.0
