@@ -3,6 +3,7 @@
 
 import os
 from datetime import datetime
+import logging
 
 import numpy as np
 import torch
@@ -11,6 +12,20 @@ import clip
 
 from open3dsg.config.config import CONF
 from open3dsg.models.sgpn import SGPN
+
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_save(tensor: torch.Tensor, path: str, scan_id: str, kind: str) -> None:
+    """Persist ``tensor`` to ``path`` and ensure the file exists."""
+    try:
+        torch.save(tensor, path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"{path} was not created")
+    except Exception as e:  # pragma: no cover - I/O best effort
+        logger.error("Failed to save %s for %s: %s", kind, scan_id, e)
+        raise RuntimeError(f"Stage 1 aborted: could not save {kind}") from e
 
 
 def inplace_relu(m):
@@ -259,14 +274,12 @@ class FeatureDumper:
             os.makedirs(obj_path, exist_ok=True)
             os.makedirs(obj_valid_path, exist_ok=True)
 
-            torch.save(
-                clip_obj_emb.detach().cpu(),
-                os.path.join(obj_path, data_dict['scan_id'][bidx] + '.pt'),
-            )
-            torch.save(
-                obj_valids.detach().cpu(),
-                os.path.join(obj_valid_path, data_dict['scan_id'][bidx] + '.pt'),
-            )
+            scan_id = data_dict['scan_id'][bidx]
+            obj_file = os.path.join(obj_path, scan_id + '.pt')
+            _safe_save(clip_obj_emb.detach().cpu(), obj_file, scan_id, "object features")
+
+            valid_file = os.path.join(obj_valid_path, scan_id + '.pt')
+            _safe_save(obj_valids.detach().cpu(), valid_file, scan_id, "object valid flags")
             if clip_rel_emb_masked is not None:
                 rel_clip_model = (
                     self.hparams['edge_model']
@@ -281,7 +294,10 @@ class FeatureDumper:
                     path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-')
                 )
                 os.makedirs(rel_path, exist_ok=True)
-                torch.save(
+                rel_file = os.path.join(rel_path, scan_id + '.pt')
+                _safe_save(
                     clip_rel_emb_masked.detach().cpu(),
-                    os.path.join(rel_path, data_dict['scan_id'][bidx] + '.pt'),
+                    rel_file,
+                    scan_id,
+                    "relationship features",
                 )
