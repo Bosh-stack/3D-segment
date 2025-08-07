@@ -65,9 +65,12 @@ def _parse_args():
     return args
 
 def main_worker(fabric: Fabric, args):
+    rank_dir = str(fabric.global_rank)
+
     # Stage 1: compute node features unless provided
     if args.load_node_features:
-        feature_dir = args.load_node_features
+        feature_dir = os.path.join(args.load_node_features, rank_dir)
+        os.makedirs(feature_dir, exist_ok=True)
     else:
         node_hparams = {
             "clip_model": "OpenSeg",
@@ -92,6 +95,8 @@ def main_worker(fabric: Fabric, args):
         )
         loader = fabric.setup_dataloaders(loader)
         feature_dir = args.out_dir or dumper.clip_path
+        feature_dir = os.path.join(feature_dir, rank_dir)
+        os.makedirs(feature_dir, exist_ok=True)
         for batch in tqdm(loader, desc="Nodes"):
             with torch.no_grad():
                 batch = dumper.encode_features(batch)
