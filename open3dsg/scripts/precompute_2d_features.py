@@ -1,12 +1,13 @@
 import argparse
+import gc
 import json
 import os
-import gc
+import shutil
 
 import torch
+from lightning import Fabric
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
-from lightning import Fabric
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
@@ -69,8 +70,7 @@ def main_worker(fabric: Fabric, args):
 
     # Stage 1: compute node features unless provided
     if args.load_node_features:
-        feature_dir = os.path.join(args.load_node_features, rank_dir)
-        os.makedirs(feature_dir, exist_ok=True)
+        feature_root = args.load_node_features
     else:
         node_hparams = {
             "clip_model": "OpenSeg",
@@ -94,8 +94,8 @@ def main_worker(fabric: Fabric, args):
             dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
         )
         loader = fabric.setup_dataloaders(loader)
-        feature_dir = args.out_dir or dumper.clip_path
-        feature_dir = os.path.join(feature_dir, rank_dir)
+        feature_root = args.out_dir or dumper.clip_path
+        feature_dir = os.path.join(feature_root, rank_dir)
         os.makedirs(feature_dir, exist_ok=True)
         for batch in tqdm(loader, desc="Nodes"):
             with torch.no_grad():
@@ -111,7 +111,16 @@ def main_worker(fabric: Fabric, args):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
-        fabric.barrier()
+
+    fabric.barrier()
+    if fabric.global_rank == 0:
+        for r in range(fabric.world_size):
+            src_dir = os.path.join(feature_root, str(r))
+            if os.path.isdir(src_dir):
+                for name in os.listdir(src_dir):
+                    shutil.move(os.path.join(src_dir, name), feature_root)
+                shutil.rmtree(src_dir)
+    fabric.barrier()
 
     # Stage 2: compute edge features
     edge_hparams = {
@@ -127,7 +136,7 @@ def main_worker(fabric: Fabric, args):
     dumper = FeatureDumper(edge_hparams, device=fabric.local_rank)
     dumper.setup()
     dataset = _build_dataset(
-        args, load_features=feature_dir, skip_edge_features=False, load_node_features_only=True
+        args, load_features=feature_root, skip_edge_features=False, load_node_features_only=True
     )
     sampler = DistributedSampler(
         dataset,
@@ -139,11 +148,13 @@ def main_worker(fabric: Fabric, args):
         dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
     )
     loader = fabric.setup_dataloaders(loader)
+    edge_dir = os.path.join(feature_root, f"edges_{rank_dir}")
+    os.makedirs(edge_dir, exist_ok=True)
     for batch in tqdm(loader, desc="Edges"):
         with torch.no_grad():
             batch = dumper.encode_features(batch)
             bsz = batch["clip_obj_encoding"].shape[0]
-            dumper._dump_features(batch, bsz, path=feature_dir)
+            dumper._dump_features(batch, bsz, path=edge_dir)
         del batch
         gc.collect()
         if torch.cuda.is_available():
