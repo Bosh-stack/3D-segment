@@ -6,7 +6,7 @@ import gc
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
-from lightning import Fabric
+from lightning_fabric import Fabric
 
 from open3dsg.config.config import CONF
 from open3dsg.data.open_dataset import Open2D3DSGDataset
