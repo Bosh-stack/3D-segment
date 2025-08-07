@@ -115,11 +115,21 @@ def main_worker(fabric: Fabric, args):
     fabric.barrier()
     if fabric.global_rank == 0:
         for r in range(fabric.world_size):
-            src_dir = os.path.join(feature_root, str(r))
-            if os.path.isdir(src_dir):
-                for name in os.listdir(src_dir):
-                    shutil.move(os.path.join(src_dir, name), feature_root)
-                shutil.rmtree(src_dir)
+            rank_dir = os.path.join(feature_root, str(r))
+            if not os.path.isdir(rank_dir):
+                continue
+            for subdir_name in os.listdir(rank_dir):
+                src_subdir = os.path.join(rank_dir, subdir_name)
+                if not os.path.isdir(src_subdir):
+                    continue
+                dest_dir = os.path.join(feature_root, subdir_name)
+                os.makedirs(dest_dir, exist_ok=True)
+                for item in os.listdir(src_subdir):
+                    src_item = os.path.join(src_subdir, item)
+                    dest_item = os.path.join(dest_dir, item)
+                    if not os.path.exists(dest_item):
+                        shutil.move(src_item, dest_item)
+            shutil.rmtree(rank_dir)
     fabric.barrier()
 
     # Stage 2: compute edge features
