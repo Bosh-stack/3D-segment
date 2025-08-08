@@ -230,6 +230,11 @@ class FeatureDumper:
         return obj_valids, clip_obj_emb, clip_rel_emb_masked
 
     def _dump_features(self, data_dict, batch_size, path=CONF.PATH.FEATURES):
+        def _atomic_save(tensor, final_path: str):
+            tmp_path = final_path + ".tmp"
+            torch.save(tensor, tmp_path)
+            os.replace(tmp_path, final_path)  # atomic on POSIX
+
         for bidx in range(batch_size):
             obj_count = int(data_dict['objects_count'][bidx].item())
             rel_count = int(data_dict['predicate_count'][bidx].item())
@@ -259,11 +264,11 @@ class FeatureDumper:
             os.makedirs(obj_path, exist_ok=True)
             os.makedirs(obj_valid_path, exist_ok=True)
 
-            torch.save(
+            _atomic_save(
                 clip_obj_emb.detach().cpu(),
                 os.path.join(obj_path, data_dict['scan_id'][bidx] + '.pt'),
             )
-            torch.save(
+            _atomic_save(
                 obj_valids.detach().cpu(),
                 os.path.join(obj_valid_path, data_dict['scan_id'][bidx] + '.pt'),
             )
@@ -281,7 +286,7 @@ class FeatureDumper:
                     path, 'export_rel_clip_emb_clip_' + rel_clip_model.replace('/', '-')
                 )
                 os.makedirs(rel_path, exist_ok=True)
-                torch.save(
+                _atomic_save(
                     clip_rel_emb_masked.detach().cpu(),
                     os.path.join(rel_path, data_dict['scan_id'][bidx] + '.pt'),
                 )

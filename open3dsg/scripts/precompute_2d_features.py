@@ -66,7 +66,7 @@ def _parse_args():
     return args
 
 def main_worker(fabric: Fabric, args):
-    rank_dir = str(fabric.global_rank)
+    rank_dir = str(fabric.global_rank)  # no longer used for output paths
 
     # Stage 1: compute node features unless provided
     if args.load_node_features:
@@ -95,13 +95,12 @@ def main_worker(fabric: Fabric, args):
         )
         loader = fabric.setup_dataloaders(loader)
         feature_root = args.out_dir or dumper.clip_path
-        feature_dir = os.path.join(feature_root, rank_dir)
-        os.makedirs(feature_dir, exist_ok=True)
+        os.makedirs(feature_root, exist_ok=True)
         for batch in tqdm(loader, desc="Nodes"):
             with torch.no_grad():
                 batch = dumper.encode_features(batch)
                 bsz = batch["clip_obj_encoding"].shape[0]
-                dumper._dump_features(batch, bsz, path=feature_dir)
+                dumper._dump_features(batch, bsz, path=feature_root)
             del batch
             gc.collect()
             if torch.cuda.is_available():
@@ -112,25 +111,7 @@ def main_worker(fabric: Fabric, args):
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 
-    fabric.barrier()
-    for r in range(fabric.world_size):
-        fabric.barrier()
-        if fabric.global_rank == r:
-            rank_dir = os.path.join(feature_root, str(r))
-            if os.path.isdir(rank_dir):
-                for subdir_name in os.listdir(rank_dir):
-                    src_subdir = os.path.join(rank_dir, subdir_name)
-                    if not os.path.isdir(src_subdir):
-                        continue
-                    dest_dir = os.path.join(feature_root, subdir_name)
-                    os.makedirs(dest_dir, exist_ok=True)
-                    for item in os.listdir(src_subdir):
-                        src_item = os.path.join(src_subdir, item)
-                        dest_item = os.path.join(dest_dir, item)
-                        if not os.path.exists(dest_item):
-                            shutil.move(src_item, dest_item)
-                shutil.rmtree(rank_dir)
-        fabric.barrier()
+    # No merge step needed anymore.
 
     # Stage 2: compute edge features
     edge_hparams = {
@@ -158,8 +139,7 @@ def main_worker(fabric: Fabric, args):
         dataset, batch_size=1, sampler=sampler, collate_fn=dataset.collate_fn
     )
     loader = fabric.setup_dataloaders(loader)
-    edge_dir = os.path.join(feature_root, f"edges_{rank_dir}")
-    os.makedirs(edge_dir, exist_ok=True)
+    edge_dir = feature_root  # dump edges directly to final dirs
     for batch in tqdm(loader, desc="Edges"):
         with torch.no_grad():
             batch = dumper.encode_features(batch)
