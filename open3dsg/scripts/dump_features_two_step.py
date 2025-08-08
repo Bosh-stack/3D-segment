@@ -274,12 +274,22 @@ def main():
             rank_dir = os.path.join(base_dir, f"rank{r}")
             if not os.path.isdir(rank_dir):
                 continue
-            for sub in os.listdir(rank_dir):
-                src = os.path.join(rank_dir, sub)
-                dst = os.path.join(base_dir, sub)
-                os.makedirs(dst, exist_ok=True)
-                for fname in os.listdir(src):
-                    shutil.move(os.path.join(src, fname), os.path.join(dst, fname))
+            for root, _, files in os.walk(rank_dir):
+                rel_path = os.path.relpath(root, rank_dir)
+                dest_root = os.path.join(base_dir, rel_path) if rel_path != "." else base_dir
+                os.makedirs(dest_root, exist_ok=True)
+                for fname in files:
+                    src_file = os.path.join(root, fname)
+                    dst_file = os.path.join(dest_root, fname)
+                    if os.path.exists(dst_file):
+                        base, ext = os.path.splitext(fname)
+                        i = 1
+                        new_dst = dst_file
+                        while os.path.exists(new_dst):
+                            new_dst = os.path.join(dest_root, f"{base}_{i}{ext}")
+                            i += 1
+                        dst_file = new_dst
+                    shutil.move(src_file, dst_file)
             shutil.rmtree(rank_dir)
     else:
         worker(0, 1, args)
