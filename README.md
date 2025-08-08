@@ -110,6 +110,25 @@ python open3dsg/script/run.py --test --dataset 3rscan --checkpoint [path to chec
 
 We use the ```CLIP ViT-L/14@336px``` to query object classes from the node embedding. Use ```--n_beams``` to adjust the beam search for the LLM relationship output and ```--weight_2d``` to adjust the 2D-3D features fusion. A value of 0.0 indicates a prediction from 3D features only
 
+## Merge 3D Masks
+
+The repository provides `scripts/merge_3d_masks.py` to combine two 3D mask point
+clouds based on 2D pixel overlap. The script accepts a `--max-dist` option
+specifying the maximum centroid-to-centroid distance allowed for merging
+(`1.0` by default). If the masks are farther apart the merge is skipped.
+
+```bash
+python scripts/merge_3d_masks.py <scan_dir> merged.ply --inst mask_a.ply mask_b.ply --max-dist 1.5
+```
+
+You can visualise the result with `scripts/display_merge.py`:
+
+```bash
+python scripts/display_merge.py mask_a.ply mask_b.ply merged.ply
+```
+
+Only mask pairs within the distance threshold are merged.
+
 ## Citation
 
 If you find our code or paper useful, please cite
