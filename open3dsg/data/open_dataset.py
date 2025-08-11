@@ -8,6 +8,7 @@ import json
 import logging
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch.utils.data import Dataset
 from tqdm import tqdm
 import pickle
@@ -261,7 +262,16 @@ class Open2D3DSGDataset(Dataset):
                 logger.exception("Failed to load ScanNet data")
                 raise
 
+        # Ensure deterministic ordering across ranks
+        shared_list = sorted(list(shared_list), key=lambda d: d.scene_id)
         self.scene_data = shared_list
+        if dist.is_available() and dist.is_initialized():
+            scene_ids = [d.scene_id for d in self.scene_data]
+            obj_list = [scene_ids]
+            dist.broadcast_object_list(obj_list, src=0)
+            if dist.get_rank() != 0:
+                assert scene_ids == obj_list[0], "Scene ordering mismatch across ranks"
+
         self.pixel_data = {}
 
     def __len__(self):
