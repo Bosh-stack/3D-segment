@@ -103,6 +103,24 @@ def main_worker(fabric: Fabric, args):
         feature_root = args.out_dir or dumper.clip_path
         node_feature_dir = os.path.join(feature_root, rank_dir)
         os.makedirs(node_feature_dir, exist_ok=True)
+
+        # Diagnostic: show which files this GPU will process
+        obj_clip_model = (
+            node_hparams["node_model"]
+            if node_hparams.get("node_model") and node_hparams["clip_model"] != "OpenSeg"
+            else node_hparams["clip_model"]
+        )
+        obj_path = os.path.join(
+            node_feature_dir,
+            "export_obj_clip_emb_clip_" + obj_clip_model.replace("/", "-"),
+        )
+        for idx in list(sampler):
+            scan_id = dataset.scene_data[idx].scan_id
+            print(
+                f"GPU {fabric.global_rank} -> "
+                f"{os.path.join(obj_path, scan_id + '.pt')}"
+            )
+
         for batch in tqdm(loader, desc="Nodes"):
             with torch.no_grad():
                 batch = dumper.encode_features(batch)
