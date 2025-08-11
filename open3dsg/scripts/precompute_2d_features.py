@@ -17,7 +17,12 @@ from open3dsg.scripts.feature_dumper import FeatureDumper
 def _load_relationships(dataset: str):
     base = CONF.PATH.MYSET_GRAPHS_OUT if dataset.lower() == "myset" else CONF.PATH.SCANNET
     path = os.path.join(base, "subgraphs", "relationships_train.json")
-    return json.load(open(path))["scans"]
+    try:
+        with open(path) as f:
+            return json.load(f)["scans"]
+    except Exception as e:  # pragma: no cover - diagnostic output
+        print(f"Failed to load relationships file: {path} ({e})")
+        raise
 
 
 def _build_dataset(args, load_features=None, skip_edge_features=False, load_node_features_only=False):
