@@ -659,12 +659,20 @@ class Open2D3DSGDataset(Dataset):
 
         if torch_numpy == '.npy':
             obj_features = torch.from_numpy(np.load(obj_feature_pth))
+            print(f"Loaded object features from {obj_feature_pth}")
             obj_valid_features = torch.from_numpy(np.load(obj_valid_feature_pth))
+            print(f"Loaded object valids from {obj_valid_feature_pth}")
             rel_features = torch.from_numpy(np.load(rel_feature_pth)) if rel_feature_pth else None
+            if rel_feature_pth:
+                print(f"Loaded relationship features from {rel_feature_pth}")
         else:
             obj_features = torch.load(obj_feature_pth)
+            print(f"Loaded object features from {obj_feature_pth}")
             obj_valid_features = torch.load(obj_valid_feature_pth)
+            print(f"Loaded object valids from {obj_valid_feature_pth}")
             rel_features = torch.load(rel_feature_pth) if rel_feature_pth else None
+            if rel_feature_pth:
+                print(f"Loaded relationship features from {rel_feature_pth}")
 
         data_dict["clip_obj_encoding"] = torch.zeros((self.max_objs, obj_features.shape[-1]))
         data_dict["clip_obj_encoding"][:len(obj_features)] = obj_features
