@@ -5,6 +5,7 @@ import os
 import os.path as osp
 import time
 import json
+import logging
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -156,7 +157,9 @@ def _load_data_tqdm(shared_list, relationship):
         data_dict["scene_id"] = relationship["scan"]
         shared_list.append(DataDict(data_dict))
     except Exception as e:
-        print(e, path)
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Failed to load {path}")
+        raise
 
 
 def _load_data_scannet_tqdm(shared_list, relationship):
@@ -175,7 +178,9 @@ def _load_data_scannet_tqdm(shared_list, relationship):
 
         shared_list.append(DataDict(data_dict))
     except Exception as e:
-        print(e, path)
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Failed to load {path}")
+        raise
 
 
 class Open2D3DSGDataset(Dataset):
@@ -240,11 +245,21 @@ class Open2D3DSGDataset(Dataset):
             self.obj_mask_crit -= 0.1
             self.rel_vis_crit -= 0.1
             # Load all data into ram for faster training
-            process_map(partial(_load_data_tqdm, shared_list), self.relationships_R3SCAN, max_workers=8, chunksize=1)
+            try:
+                process_map(partial(_load_data_tqdm, shared_list), self.relationships_R3SCAN, max_workers=8, chunksize=1)
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to load R3SCAN data")
+                raise
 
         if self.relationships_scannet:
             # Load all data into ram for faster training
-            process_map(partial(_load_data_scannet_tqdm, shared_list), self.relationships_scannet, max_workers=8, chunksize=1)
+            try:
+                process_map(partial(_load_data_scannet_tqdm, shared_list), self.relationships_scannet, max_workers=8, chunksize=1)
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to load ScanNet data")
+                raise
 
         self.scene_data = shared_list
         self.pixel_data = {}
