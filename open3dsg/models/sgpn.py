@@ -5,6 +5,7 @@ import os
 import re
 import torch
 import torch.nn as nn
+from torch.cuda.amp import autocast
 import numpy as np
 
 import clip
@@ -404,28 +405,54 @@ class SGPN(nn.Module):
 
     @torch.no_grad()
     def clip_encode_imgs(self, obj_imgs, rel_imgs):
+        """
+        Batched CLIP image encoding for nodes and relations to cap VRAM.
+        Preserves original output shapes: (*imgs.shape[:-3], D)
+        """
+        device = self.clip_device if hasattr(self, "clip_device") else (obj_imgs.device if isinstance(obj_imgs, torch.Tensor) else "cuda")
+        use_amp = bool(self.hparams.get("amp", False))
+        bs = int(self.hparams.get("clip_batch_size", 64))
+
+        # ---------- Objects ----------
         img_dim = obj_imgs.shape[-2:]
+        flat_obj = obj_imgs.view(-1, 3, *img_dim)  # (N_all, 3, H, W)
+        obj_chunks = []
+        enc = self.CLIP_NODE if self.hparams['node_model'] else self.CLIP
+        for s in range(0, flat_obj.shape[0], bs):
+            e = min(flat_obj.shape[0], s + bs)
+            chunk = flat_obj[s:e]  # already on correct device via caller
+            with autocast(enabled=use_amp):
+                out = enc.encode_image(chunk)
+            # L2-normalize chunk, then append (stays on current device)
+            out = out / out.norm(dim=-1, keepdim=True)
+            obj_chunks.append(out)
+            del out
+            torch.cuda.empty_cache()
+        obj_clip_encoding = torch.cat(obj_chunks, dim=0).view(*obj_imgs.shape[:-3], -1)
 
-        with torch.no_grad():
-            obj_imgs_batched = obj_imgs.view(-1, 3, *img_dim)
-
-            if self.hparams['node_model']:
-                obj_clip_encoding = self.CLIP_NODE.encode_image(obj_imgs_batched).view(*obj_imgs.shape[:-3], -1)
-            else:
-                obj_clip_encoding = self.CLIP.encode_image(obj_imgs_batched).view(*obj_imgs.shape[:-3], -1)
-            obj_clip_encoding = obj_clip_encoding/obj_clip_encoding.norm(dim=-1, keepdim=True)
-
-            if not self.hparams.get('skip_edge_features') and self.CLIP is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
-                rel_img_dim = rel_imgs.shape[-2:]
-                rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
-                if self.hparams['edge_model']:
-                    rel_clip_encoding = self.CLIP_EDGE.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-                else:
-                    rel_clip_encoding = self.CLIP.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-
-                rel_clip_encoding = rel_clip_encoding/rel_clip_encoding.norm(dim=-1, keepdim=True)
-            else:
-                rel_clip_encoding = None
+        # ---------- Relations ----------
+        rel_clip_encoding = None
+        if (
+            not self.hparams.get('skip_edge_features')
+            and self.CLIP is not None
+            and not self.hparams.get('blip')
+            and not self.hparams.get('llava')
+            and rel_imgs is not None
+        ):
+            rel_img_dim = rel_imgs.shape[-2:]
+            flat_rel = rel_imgs.view(-1, 3, *rel_img_dim)
+            rel_chunks = []
+            enc_rel = self.CLIP_EDGE if self.hparams.get('edge_model') else self.CLIP
+            for s in range(0, flat_rel.shape[0], bs):
+                e = min(flat_rel.shape[0], s + bs)
+                chunk = flat_rel[s:e]
+                with autocast(enabled=use_amp):
+                    out = enc_rel.encode_image(chunk)
+                out = out / out.norm(dim=-1, keepdim=True)
+                rel_chunks.append(out)
+                del out
+                torch.cuda.empty_cache()
+            rel_clip_encoding = torch.cat(rel_chunks, dim=0).view(*rel_imgs.shape[:-3], -1)
 
         return obj_clip_encoding, rel_clip_encoding
 
@@ -456,15 +483,23 @@ class SGPN(nn.Module):
 
         if not self.hparams.get('skip_edge_features') and self.CLIP is not None and not self.hparams.get('blip') and not self.hparams.get('llava'):
             rel_img_dim = rel_imgs.shape[-2:]
-            with torch.no_grad():
-                rel_imgs_batched = rel_imgs.view(-1, 3, *rel_img_dim)
+            flat_rel = rel_imgs.view(-1, 3, *rel_img_dim)
+            bs = int(self.hparams.get("clip_batch_size", 64))
+            use_amp = bool(self.hparams.get("amp", False))
+            enc_rel = self.CLIP_EDGE if self.hparams.get('edge_model') else self.CLIP
 
-                if self.hparams['edge_model']:
-                    rel_clip_encoding = self.CLIP_EDGE.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
-                else:
-                    rel_clip_encoding = self.CLIP.encode_image(rel_imgs_batched).view(*rel_imgs.shape[:-3], -1)
+            rel_chunks = []
+            for s in range(0, flat_rel.shape[0], bs):
+                e = min(flat_rel.shape[0], s + bs)
+                chunk = flat_rel[s:e]
+                with autocast(enabled=use_amp):
+                    out = enc_rel.encode_image(chunk)
+                out = out / out.norm(dim=-1, keepdim=True)
+                rel_chunks.append(out)
+                del out
+                torch.cuda.empty_cache()
 
-                rel_clip_encoding = rel_clip_encoding/rel_clip_encoding.norm(dim=-1, keepdim=True)
+            rel_clip_encoding = torch.cat(rel_chunks, dim=0).view(*rel_imgs.shape[:-3], -1)
         else:
             rel_clip_encoding = None
 
