@@ -554,6 +554,9 @@ class Open2D3DSGDataset(Dataset):
     def load_imgs(self, data_dict):
         obj_imgs, obj2frame_mask = self.obj_frame_selection(
             data_dict["obj2frame"], data_dict["scene_id"], data_dict['dataset'], top_k=self.top_k_frames, scales=self.scales)
+        if len(obj_imgs) > self.max_objs:
+            obj_imgs = obj_imgs[:self.max_objs]
+            obj2frame_mask = {k: v for k, v in obj2frame_mask.items() if k < self.max_objs}
         obj_imgs = torch.stack(obj_imgs, dim=0)
         data_dict["object_imgs"] = torch.zeros((self.max_objs, *obj_imgs.shape[1:]))
         data_dict["object_imgs"][:len(obj_imgs)] = obj_imgs
@@ -563,8 +566,9 @@ class Open2D3DSGDataset(Dataset):
         data_dict["obj2frame_mask"] = np.pad(data_dict["obj2frame_mask"], padding_width, mode='constant', constant_values=0)
 
         if self.openseg:
+            obj2frame_trunc = {k: v for k, v in data_dict["obj2frame"].items() if k < self.max_objs}
             obj_raw_imgs, obj2frame_raw_mask, obj_frame_pixels = self.obj_pixel_selection(
-                data_dict["obj2frame"], data_dict["scene_id"], data_dict['dataset'], top_k=self.top_k_frames)
+                obj2frame_trunc, data_dict["scene_id"], data_dict['dataset'], top_k=self.top_k_frames)
             obj_raw_imgs = np.stack(obj_raw_imgs, axis=0)
             data_dict["object_raw_imgs"] = np.zeros((self.max_objs, *obj_raw_imgs.shape[1:]))
             data_dict["object_raw_imgs"][:len(obj_raw_imgs)] = obj_raw_imgs
