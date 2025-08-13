@@ -84,6 +84,16 @@ The script writes `relationships_<split>_full.json` and the merged feature
 files into the chosen output directory. These can be used with
 `--load_features` for training large scenes.
 
+## Batch OpenSeg Image Processing
+
+To encode a directory of images with the OpenSeg model and store per-pixel features and a colourised segmentation map run:
+
+```bash
+python open3dsg/scripts/openseg_batch_jpeg.py <image_dir> <output_dir> --model_dir checkpoints/openseg --clusters 20
+```
+
+The script recursively processes `.jpg`, `.jpeg`, `.png` and `.bmp` files, preserving the input directory structure in the output.
+
 ## Profile GPU Memory
 
 To inspect GPU memory usage of each pretrained component run:
