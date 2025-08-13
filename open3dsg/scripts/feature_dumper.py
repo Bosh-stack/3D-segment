@@ -127,12 +127,8 @@ class FeatureDumper:
         obj_pixels = data_dict.get('object_pixels')
         obj_nums = data_dict.get('objects_count')
 
-        if obj_imgs is not None and torch.is_tensor(obj_imgs):
-            obj_imgs = obj_imgs.to(device)
         if obj_raw_imgs is not None and torch.is_tensor(obj_raw_imgs):
             obj_raw_imgs = obj_raw_imgs.to(device)
-        if rel_imgs is not None and torch.is_tensor(rel_imgs):
-            rel_imgs = rel_imgs.to(device)
 
         def _rel_imgs_empty(imgs):
             return imgs is None or (
@@ -204,9 +200,13 @@ class FeatureDumper:
             has_frame_dim = clip_obj_emb.dim() > 2
 
             if has_mask and has_frame_dim:
-                clip_obj2frame_mask = data_dict[mask_key][bidx][:obj_count]
+                clip_obj2frame_mask = data_dict[mask_key][bidx][:obj_count].to(
+                    clip_obj_emb.device
+                )
                 clip_obj_mask = (
-                    torch.arange(clip_obj_emb.size(1)).unsqueeze(0).to(clip_obj2frame_mask.device)
+                    torch.arange(
+                        clip_obj_emb.size(1), device=clip_obj_emb.device
+                    ).unsqueeze(0)
                     < clip_obj2frame_mask.unsqueeze(1)
                 )
                 clip_obj_emb[~clip_obj_mask] = np.nan
@@ -216,9 +216,13 @@ class FeatureDumper:
                 obj_valids = ~torch.isnan(clip_obj_emb).all(-1)
 
         if isinstance(clip_rel_emb, torch.Tensor):
-            clip_rel2frame_mask = data_dict['rel2frame_mask'][bidx][:rel_count]
+            clip_rel2frame_mask = data_dict['rel2frame_mask'][bidx][:rel_count].to(
+                clip_rel_emb.device
+            )
             clip_rel_mask = (
-                torch.arange(clip_rel_emb.size(1)).unsqueeze(0).to(clip_rel2frame_mask.device)
+                torch.arange(
+                    clip_rel_emb.size(1), device=clip_rel_emb.device
+                ).unsqueeze(0)
                 < clip_rel2frame_mask.unsqueeze(1)
             )
             clip_rel_emb[~clip_rel_mask] = np.nan
