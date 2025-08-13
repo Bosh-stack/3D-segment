@@ -22,3 +22,5 @@ torch-spline-conv==1.2.2
 tqdm
 transformers>=4.31.0
 trimesh
+Pillow
+scikit-learn
