@@ -69,6 +69,8 @@ def main():
 
         inst_meta = []
         objects_pcl = []
+        objects_pcl_glob = []
+        objects_file = []
         objects_num = []
         objects_center = []
         objects_scale = []
@@ -85,6 +87,8 @@ def main():
             padded = np.zeros((OBJ_SAMPLE, pcl.shape[1]), dtype=pcl.dtype)
             padded[:pcl.shape[0]] = pcl
             objects_pcl.append(padded)
+            objects_pcl_glob.append(padded)
+            objects_file.append(node["file"])
             objects_num.append(min(pcl.shape[0], OBJ_SAMPLE))
             aabb_min = np.array(node["aabb"][0])
             aabb_max = np.array(node["aabb"][1])
@@ -202,7 +206,8 @@ def main():
             "objects_cat": [0] * len(objects_id),
             "objects_num": objects_num,
             "objects_pcl": [p.tolist() for p in objects_pcl],
-            "objects_pcl_glob": [],
+            "objects_pcl_glob": [p.tolist() for p in objects_pcl_glob],
+            "objects_file": objects_file,
             "objects_center": objects_center,
             "objects_scale": objects_scale,
             "predicate_cat": predicate_cat,
