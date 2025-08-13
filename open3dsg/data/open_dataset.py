@@ -120,6 +120,8 @@ class DataDict:
         self.objects_cat = np.array(data_dict["objects_cat"]).astype(np.uint8)
         self.objects_num = np.array(data_dict["objects_num"]).astype(np.int16)
         self.objects_pcl = np.array(data_dict["objects_pcl"]).astype(np.float32)
+        if "objects_pcl_glob" in data_dict:
+            self.objects_pcl_glob = np.array(data_dict["objects_pcl_glob"]).astype(np.float32)
         self.objects_center = np.array(data_dict["objects_center"]).astype(np.float32)
         self.objects_scale = np.array(data_dict["objects_scale"]).astype(np.float32)
         self.predicate_cat = np.array(data_dict["predicate_cat"]).astype(np.uint8)
@@ -140,6 +142,7 @@ class DataDict:
         self.rel2frame_mask = data_dict['rel2frame_mask']
         self.scene_id = data_dict["scene_id"]
         self.id2name = data_dict['id2name']
+        self.objects_file = data_dict.get("objects_file", [])
 
 
 def _load_data_tqdm(shared_list, relationship):
@@ -716,6 +719,13 @@ class Open2D3DSGDataset(Dataset):
         padding_width = ((0, self.max_objs - data_dict["objects_pcl"].shape[0]), (0, 0), (0, 0))
         data_dict["objects_pcl"] = np.pad(data_dict["objects_pcl"], padding_width, mode='constant')
         data_dict["objects_pcl"] = data_dict["objects_pcl"].astype(np.float32)
+
+        if "objects_pcl_glob" in data_dict and data_dict["objects_pcl_glob"].size > 0:
+            padding_width = ((0, self.max_objs - data_dict["objects_pcl_glob"].shape[0]), (0, 0), (0, 0))
+            data_dict["objects_pcl_glob"] = np.pad(data_dict["objects_pcl_glob"], padding_width, mode='constant')
+            data_dict["objects_pcl_glob"] = data_dict["objects_pcl_glob"].astype(np.float32)
+        else:
+            data_dict["objects_pcl_glob"] = np.zeros_like(data_dict["objects_pcl"])
 
         padding_width = ((0, self.max_objs - data_dict["objects_center"].shape[0]), (0, 0))
         data_dict["objects_center"] = np.pad(data_dict["objects_center"], padding_width, mode='constant', constant_values=0)
