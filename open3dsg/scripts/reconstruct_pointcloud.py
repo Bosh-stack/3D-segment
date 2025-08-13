@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Output file (.ply or .npz) for the reconstructed point cloud",
     )
+    parser.add_argument(
+        "--instances",
+        default=None,
+        help="Optional path to instances.pkl or directory with instance .ply files",
+    )
     return parser.parse_args()
 
 
@@ -46,17 +51,39 @@ def load_graph(graph_path: str) -> dict:
         return pickle.load(f)
 
 
-def reconstruct_points(graph: dict) -> np.ndarray:
+def reconstruct_points(graph: dict, instances: str | None = None) -> np.ndarray:
     """Return concatenated point coordinates from ``graph``.
 
     If ``objects_pcl_glob`` is present, those coordinates are used directly.
     Otherwise ``objects_pcl`` are denormalised using ``objects_center`` and
     optionally ``objects_scale``.
+    If no global point clouds are present and ``instances`` are provided, the
+    instance point clouds are loaded from ``instances`` and concatenated.
     """
 
     if "objects_pcl_glob" in graph and len(graph["objects_pcl_glob"]) > 0:
         obj_pcls = np.asarray(graph["objects_pcl_glob"], dtype=np.float32)
         points = [p[:, :3] for p in obj_pcls]
+    elif instances is not None:
+        from open3d import io as o3d_io
+
+        inst_path = Path(instances)
+        if inst_path.is_dir():
+            ply_files = sorted(inst_path.glob("*.ply"))
+        else:
+            with open(inst_path, "rb") as f:
+                data = pickle.load(f)
+            iterable = data.values() if isinstance(data, dict) else data
+            ply_files = []
+            for item in iterable:
+                if isinstance(item, dict) and "file" in item:
+                    ply_files.append(inst_path.parent / item["file"])
+                else:
+                    ply_files.append(Path(item))
+        points = []
+        for ply in ply_files:
+            pcl = o3d_io.read_point_cloud(str(ply))
+            points.append(np.asarray(pcl.points))
     else:
         obj_pcls = np.asarray(graph["objects_pcl"], dtype=np.float32)
         centers = np.asarray(graph["objects_center"], dtype=np.float32)
@@ -90,7 +117,7 @@ def save_points(points: np.ndarray, out_file: str) -> None:
 def main() -> None:
     args = parse_args()
     graph = load_graph(args.graph)
-    points = reconstruct_points(graph)
+    points = reconstruct_points(graph, args.instances)
     save_points(points, args.out)
 
 
