@@ -409,7 +409,7 @@ class SGPN(nn.Module):
         Batched CLIP image encoding for nodes and relations to cap VRAM.
         Preserves original output shapes: (*imgs.shape[:-3], D)
         """
-        device = self.clip_device if hasattr(self, "clip_device") else (obj_imgs.device if isinstance(obj_imgs, torch.Tensor) else "cuda")
+        device = self.clip_device if hasattr(self, "clip_device") else "cuda"
         use_amp = bool(self.hparams.get("amp", False))
         bs = int(self.hparams.get("clip_batch_size", 64))
 
@@ -420,13 +420,13 @@ class SGPN(nn.Module):
         enc = self.CLIP_NODE if self.hparams['node_model'] else self.CLIP
         for s in range(0, flat_obj.shape[0], bs):
             e = min(flat_obj.shape[0], s + bs)
-            chunk = flat_obj[s:e]  # already on correct device via caller
+            chunk = flat_obj[s:e].to(device)
             with autocast(enabled=use_amp):
                 out = enc.encode_image(chunk)
-            # L2-normalize chunk, then append (stays on current device)
+            # L2-normalize chunk, then append to CPU list
             out = out / out.norm(dim=-1, keepdim=True)
-            obj_chunks.append(out)
-            del out
+            obj_chunks.append(out.cpu())
+            del out, chunk
             torch.cuda.empty_cache()
         obj_clip_encoding = torch.cat(obj_chunks, dim=0).view(*obj_imgs.shape[:-3], -1)
 
@@ -445,12 +445,12 @@ class SGPN(nn.Module):
             enc_rel = self.CLIP_EDGE if self.hparams.get('edge_model') else self.CLIP
             for s in range(0, flat_rel.shape[0], bs):
                 e = min(flat_rel.shape[0], s + bs)
-                chunk = flat_rel[s:e]
+                chunk = flat_rel[s:e].to(device)
                 with autocast(enabled=use_amp):
                     out = enc_rel.encode_image(chunk)
                 out = out / out.norm(dim=-1, keepdim=True)
-                rel_chunks.append(out)
-                del out
+                rel_chunks.append(out.cpu())
+                del out, chunk
                 torch.cuda.empty_cache()
             rel_clip_encoding = torch.cat(rel_chunks, dim=0).view(*rel_imgs.shape[:-3], -1)
 
