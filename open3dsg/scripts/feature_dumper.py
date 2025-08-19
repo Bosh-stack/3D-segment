@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 import clip
 
+from open3dsg.models.clip_utils import encode_node_images_in_batches
+
 from open3dsg.config.config import CONF
 from open3dsg.models.sgpn import SGPN
 
@@ -155,27 +157,43 @@ class FeatureDumper:
             )
             data_dict['clip_obj_encoding'] = clip_obj_feats
         elif obj_imgs is not None:
-            rel_input = rel_imgs if torch.is_tensor(rel_imgs) else None
-            if rel_input is None:
-                rel_input = torch.zeros(
-                    obj_imgs.size(0), 1, 1, 3, obj_imgs.size(-2), obj_imgs.size(-1),
-                    device=obj_imgs.device,
+            batch_size = int(self.hparams.get('clip_batch', self.hparams.get('clip_batch_size', 64)))
+            amp = bool(self.hparams.get('clip_amp', self.hparams.get('amp', True)))
+            sync_cuda = bool(self.hparams.get('sync_cuda', False))
+            if (
+                isinstance(rel_imgs, torch.Tensor)
+                and not self.hparams.get('skip_edge_features')
+                and not self.hparams.get('blip')
+                and not self.hparams.get('llava')
+            ):
+                enc_rel = model.CLIP_EDGE if self.hparams.get('edge_model') else model.CLIP
+                clip_rel_feats = encode_node_images_in_batches(
+                    rel_imgs, enc_rel, device, batch_size, amp=amp, sync_cuda=sync_cuda
                 )
-            clip_obj_feats, clip_rel_feats = model.clip_encode_imgs(
-                obj_imgs, rel_input
+            enc_obj = model.CLIP_NODE if self.hparams.get('node_model') else model.CLIP
+            clip_obj_feats = encode_node_images_in_batches(
+                obj_imgs, enc_obj, device, batch_size, amp=amp, sync_cuda=sync_cuda
             )
             data_dict['clip_obj_encoding'] = clip_obj_feats
-        elif isinstance(rel_imgs, torch.Tensor) and not self.hparams.get('blip') and not self.hparams.get('llava'):
-            dummy = torch.zeros(
-                rel_imgs.size(0), 1, 1, 3, rel_imgs.size(-2), rel_imgs.size(-1),
-                device=rel_imgs.device,
+        elif (
+            isinstance(rel_imgs, torch.Tensor)
+            and not self.hparams.get('blip')
+            and not self.hparams.get('llava')
+        ):
+            enc_rel = model.CLIP_EDGE if self.hparams.get('edge_model') else model.CLIP
+            clip_rel_feats = encode_node_images_in_batches(
+                rel_imgs,
+                enc_rel,
+                device,
+                batch_size=int(self.hparams.get('clip_batch', self.hparams.get('clip_batch_size', 64))),
+                amp=bool(self.hparams.get('clip_amp', self.hparams.get('amp', True))),
+                sync_cuda=bool(self.hparams.get('sync_cuda', False)),
             )
-            _, clip_rel_feats = model.clip_encode_imgs(dummy, rel_imgs)
 
         if self.hparams.get('blip'):
             if rel_imgs is not None and not rel_imgs_empty:
                 data_dict['clip_rel_encoding'] = model.blip_encode_images(
-                    rel_imgs, batch_size=self.hparams.get('blip_batch_size', 32)
+                    rel_imgs, batch_size=self.hparams.get('blip_batch_size', self.hparams.get('blip_batch', 32))
                 )
             else:
                 num_frames = self.hparams.get('top_k_frames', 1) * self.hparams.get('scales', 1)

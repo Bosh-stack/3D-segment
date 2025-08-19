@@ -60,12 +60,16 @@ def _parse_args():
     parser.add_argument("--scales", type=int, default=3)
     parser.add_argument("--max_nodes", type=int, default=1000)
     parser.add_argument("--max_edges", type=int, default=2000)
-    parser.add_argument("--clip_batch_size", type=int, default=64,
+    parser.add_argument("--clip_batch", type=int, default=64,
                         help="Micro-batch size for CLIP/OpenSeg image encodes")
-    parser.add_argument("--blip_batch_size", type=int, default=32,
+    parser.add_argument("--blip_batch", type=int, default=32,
                         help="Micro-batch size for BLIP image encodes")
-    parser.add_argument("--amp", action="store_true",
-                        help="Enable torch.cuda.amp autocast during encodes")
+    parser.add_argument("--clip_amp", dest="clip_amp", action="store_true",
+                        help="Enable torch.cuda.amp autocast during CLIP encodes (default: true)")
+    parser.add_argument("--no-clip_amp", dest="clip_amp", action="store_false")
+    parser.set_defaults(clip_amp=True)
+    parser.add_argument("--sync_cuda", action="store_true",
+                        help="Synchronize CUDA after each micro-batch for debugging")
     parser.add_argument("--out_dir", default=None, help="directory to store features")
     parser.add_argument(
         "--load_node_features",
@@ -92,9 +96,13 @@ def main_worker(fabric: Fabric, args):
             "skip_edge_features": True,
             "max_nodes": args.max_nodes,
             "max_edges": args.max_edges,
-            "clip_batch_size": args.clip_batch_size,
-            "blip_batch_size": args.blip_batch_size,
-            "amp": args.amp,
+            "clip_batch": args.clip_batch,
+            "clip_batch_size": args.clip_batch,
+            "blip_batch": args.blip_batch,
+            "blip_batch_size": args.blip_batch,
+            "clip_amp": args.clip_amp,
+            "amp": args.clip_amp,
+            "sync_cuda": args.sync_cuda,
             "top_k_frames": args.top_k_frames,
             "scales": args.scales,
         }
@@ -157,9 +165,13 @@ def main_worker(fabric: Fabric, args):
         "max_nodes": args.max_nodes,
         "max_edges": args.max_edges,
         "blip": True,
-        "clip_batch_size": args.clip_batch_size,
-        "blip_batch_size": args.blip_batch_size,
-        "amp": args.amp,
+        "clip_batch": args.clip_batch,
+        "clip_batch_size": args.clip_batch,
+        "blip_batch": args.blip_batch,
+        "blip_batch_size": args.blip_batch,
+        "clip_amp": args.clip_amp,
+        "amp": args.clip_amp,
+        "sync_cuda": args.sync_cuda,
         "top_k_frames": args.top_k_frames,
         "scales": args.scales,
     }
