@@ -30,7 +30,7 @@ import argparse
 import json
 import pickle
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
 
 import numpy as np
 import open3d as o3d
@@ -215,6 +215,21 @@ def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.
 
 
 # -----------------------------
+# Frame gathering
+# -----------------------------
+
+def gather_images(scan: Path) -> List[Path]:
+    """Collect RGB frames from every ``images*`` directory in ``scan``."""
+    patterns = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG"]
+    img_files: List[Path] = []
+    for img_dir in scan.glob("images*"):
+        if img_dir.is_dir():
+            for ptn in patterns:
+                img_files.extend(sorted(img_dir.glob(ptn)))
+    return sorted(img_files)
+
+
+# -----------------------------
 # Main
 # -----------------------------
 
@@ -236,7 +251,7 @@ def main():
         inst_paths = sorted((scan / "mask/vis_instances").glob("inst_*.ply"))
         inst_pts = [np.asarray(o3d.io.read_point_cloud(str(p)).points) for p in inst_paths]
 
-        img_files = sorted((scan / "images").glob("*.*"))
+        img_files = gather_images(scan)
         object2frame = {}
 
         for inst_idx, pts in enumerate(inst_pts):
@@ -248,8 +263,13 @@ def main():
                 except Exception:
                     # if naming differs, fall back to enumeration index
                     idx = img_files.index(img_path)
-                meta = scan / f"im_metadata_{idx}.json"
-                if not meta.exists():
+                meta_candidates = [
+                    img_path.with_name(f"im_metadata_{idx}.json"),
+                    scan / f"im_metadata_{idx}.json",
+                    img_path.with_suffix(".json"),
+                ]
+                meta = next((m for m in meta_candidates if m.exists()), None)
+                if meta is None:
                     continue
                 try:
                     K, T, w, h = load_cam(meta)
