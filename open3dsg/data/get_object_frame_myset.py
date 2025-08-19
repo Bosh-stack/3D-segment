@@ -220,7 +220,7 @@ def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.
 
 def gather_images(scan: Path) -> List[Path]:
     """Collect RGB frames from every ``images*`` directory in ``scan``."""
-    patterns = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG"]
+    patterns = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"]
     img_files: List[Path] = []
     for img_dir in scan.glob("images*"):
         if img_dir.is_dir():
@@ -263,13 +263,8 @@ def main():
                 except Exception:
                     # if naming differs, fall back to enumeration index
                     idx = img_files.index(img_path)
-                meta_candidates = [
-                    img_path.with_name(f"im_metadata_{idx}.json"),
-                    scan / f"im_metadata_{idx}.json",
-                    img_path.with_suffix(".json"),
-                ]
-                meta = next((m for m in meta_candidates if m.exists()), None)
-                if meta is None:
+                meta = img_path.parent / f"im_metadata_{idx}.json"
+                if not meta.exists():
                     continue
                 try:
                     K, T, w, h = load_cam(meta)
