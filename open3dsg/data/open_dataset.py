@@ -283,6 +283,8 @@ class Open2D3DSGDataset(Dataset):
                 assert scene_ids == obj_list[0], "Scene ordering mismatch across ranks"
 
         self.pixel_data = {}
+        self.total_objects = 0
+        self.skipped_objects = 0
 
     def __len__(self):
         return len(self.scene_data)
@@ -293,7 +295,15 @@ class Open2D3DSGDataset(Dataset):
         obj2frame_mask = {k: top_k*scales for k, v in obj2frame.items()}
         obj2frame_lst = list(obj2frame.values())
         r3scan_bias = 0.5 if dataset == '3rscan' else 1
+
+        self.total_objects += len(obj2frame)
         for i, (k, v) in enumerate(obj2frame.items()):
+            if not v:
+                self.skipped_objects += 1
+                blanks = torch.zeros(((scales)*top_k, 3, self.img_dim, self.img_dim))
+                reference_imgs.append(blanks)
+                obj2frame_mask[k] = 0
+                continue
             # (frame, pixels, vis_fraction, bbox)
             obj = v  # obj2frame_lst[i]
             frames, pixels, vis, bbox, pixel_ids = tuple(zip(*obj))
@@ -351,7 +361,17 @@ class Open2D3DSGDataset(Dataset):
         r3scan_bias = 0.5 if dataset == '3rscan' else 1
         # unify raw image resolution across datasets
         blank_img_dim = (240, 320)
+
+        self.total_objects += len(obj2frame)
         for i, (k, v) in enumerate(obj2frame.items()):  # range(len(obj2frame)):
+            if not v:
+                self.skipped_objects += 1
+                blanks = torch.zeros((top_k, *blank_img_dim, 3))
+                reference_imgs.append(blanks)
+                pixel_ids_img = [np.array([[0, 0]])]*top_k
+                reference_img_pixels.append(pixel_ids_img)
+                obj2frame_mask[k] = 0
+                continue
             obj = v  # obj2frame_lst[i]
             frames, pixels, vis, bbox, pixel_ids = tuple(np.array(t) for t in zip(*obj))
 
