@@ -149,6 +149,9 @@ def main_worker(fabric: Fabric, args):
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+        print(
+            f"Skipped {dataset.skipped_objects}/{dataset.total_objects} objects with no frame associations"
+        )
         del loader, dataset, dumper
         gc.collect()
         if torch.cuda.is_available():
@@ -205,6 +208,9 @@ def main_worker(fabric: Fabric, args):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    print(
+        f"Skipped {dataset.skipped_objects}/{dataset.total_objects} objects with no frame associations"
+    )
     del loader, dataset, dumper
     gc.collect()
 
