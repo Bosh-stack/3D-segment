@@ -113,6 +113,13 @@ def read_class(path):
 clip_scales = [1.0, 1.5, 1.2, 2.0, 2.5, 1.8, 2.2, 2.8]  # possible clip scales order by diversty
 
 
+def _resolve_r3scan_frame(scene_id, frame):
+    base = os.path.join(CONF.PATH.R3SCAN_RAW, scene_id)
+    if os.path.sep in frame:
+        return os.path.join(base, frame)
+    return os.path.join(base, "sequence", frame)
+
+
 class DataDict:
     def __init__(self, data_dict):
         self.scan_id = data_dict["scan_id"]
@@ -316,7 +323,7 @@ class Open2D3DSGDataset(Dataset):
             if dataset == 'scannet':
                 imgs = [Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1])) for s in selected]
             else:
-                imgs = [Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1])).resize((224, 172)) for s in selected]
+                imgs = [Image.open(_resolve_r3scan_frame(scene_id, s[1])).resize((224, 172)) for s in selected]
 
             cropped_imgs = [img.crop(scale_bbox(s[2], sc, img)) for img, s in zip(imgs, selected) for sc in clip_scales[:scales]]
             if dataset == '3rscan':
@@ -386,7 +393,7 @@ class Open2D3DSGDataset(Dataset):
                 imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1]))
                                   .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
             else:
-                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1]))
+                imgs = [np.asarray(Image.open(_resolve_r3scan_frame(scene_id, s[1]))
                                   .rotate(-90, expand=True)
                                   .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
             pixel_ids_img = [s[2] for s in selected]
@@ -462,7 +469,7 @@ class Open2D3DSGDataset(Dataset):
             if dataset == 'scannet':
                 imgs = [Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1])) for s in selected]
             else:
-                imgs = [Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1])).resize((224, 172)) for s in selected]
+                imgs = [Image.open(_resolve_r3scan_frame(scene_id, s[1])).resize((224, 172)) for s in selected]
 
             cropped_imgs = [img.crop(scale_bbox(enclosing_bbox(s[2], s[3]), 1+(sc-1)/2, img))
                             for img, s in zip(imgs, selected) for sc in clip_scales[:scales]]
@@ -537,7 +544,7 @@ class Open2D3DSGDataset(Dataset):
             if dataset == 'scannet':
                 imgs = [Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1])) for s in selected]
             else:
-                imgs = [Image.open(os.path.join(CONF.PATH.R3SCAN_RAW, scene_id, 'sequence', s[1])) for s in selected]
+                imgs = [Image.open(_resolve_r3scan_frame(scene_id, s[1])) for s in selected]
             rel2frame_mask[list(rel2frame.keys())[i]] = len(imgs)
 
             imgs = [img.crop(scale_bbox(enclosing_bbox(s[2], s[3]), 1+(sc-1)/2, img))

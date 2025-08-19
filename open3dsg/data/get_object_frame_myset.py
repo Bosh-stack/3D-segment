@@ -236,7 +236,7 @@ def main():
         inst_paths = sorted((scan / "mask/vis_instances").glob("inst_*.ply"))
         inst_pts = [np.asarray(o3d.io.read_point_cloud(str(p)).points) for p in inst_paths]
 
-        img_files = sorted(scan.glob("image_*.*"))
+        img_files = sorted((scan / "images").glob("*.*"))
         object2frame = {}
 
         for inst_idx, pts in enumerate(inst_pts):
@@ -276,9 +276,15 @@ def main():
                         axis=1,
                     ).astype(np.uint16)
                 scores.append((idx, vis))
-                # store the frame file name instead of numeric index so the
-                # dataset loader can directly resolve the image path
-                details[idx] = (img_path.name, pix_cnt, vis, bbox, pix_ids)
+                # store path relative to the scan directory so the dataset loader
+                # can resolve images residing in subfolders
+                details[idx] = (
+                    str(img_path.relative_to(scan)),
+                    pix_cnt,
+                    vis,
+                    bbox,
+                    pix_ids,
+                )
             top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
             object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
 
