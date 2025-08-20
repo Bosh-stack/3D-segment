@@ -42,8 +42,8 @@ class MinimalSGPN(SGPN):
     @torch.no_grad()
     def blip_encode_images(self, rel_imgs, batch_size: int = 32):
         device = next(self.parameters()).device
-        rel_images_tensor = np.array(rel_imgs)
-        flat_imgs = rel_images_tensor.flatten().tolist()
+        rel_shapes = [len(r) for r in rel_imgs]
+        flat_imgs = [img for rel in rel_imgs for img in rel]
         rel_embeds = []
         with torch.no_grad():
             for i in range(0, len(flat_imgs), batch_size):
@@ -55,10 +55,18 @@ class MinimalSGPN(SGPN):
                 rel_embeds.append(self.BLIP.embedd_image(inputs["pixel_values"]))
                 torch.cuda.empty_cache()
 
-        rel_embeds = torch.cat(rel_embeds, dim=0).view(
-            (*rel_images_tensor.shape, 257, 1408)
-        )
-        return rel_embeds
+        if not flat_imgs:
+            return torch.empty((len(rel_imgs), 0, 257, 1408), device=device)
+
+        rel_embeds = torch.cat(rel_embeds, dim=0)
+        token_dim, embed_dim = rel_embeds.shape[1:]
+        max_frames = max(rel_shapes) if rel_shapes else 0
+        rebuilt = rel_embeds.new_zeros((len(rel_shapes), max_frames, token_dim, embed_dim))
+        offset = 0
+        for idx, n in enumerate(rel_shapes):
+            rebuilt[idx, :n] = rel_embeds[offset : offset + n]
+            offset += n
+        return rebuilt
 
 
 class FeatureDumper:
