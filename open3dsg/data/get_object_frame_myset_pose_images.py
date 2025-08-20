@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """MySet pose-image frame association utility.
 
-This script mirrors :mod:`get_object_frame_myset` but reads images from a
-``pose_images`` directory found in each scan.  For every instance point cloud,
-we determine the ``top_k`` frames where it is most visible and store the
-results in ``<scan_id>_object2frame.pkl`` with the same structure as the
-original script.  Each entry of the pickle file is
-``{inst_id: [(frame_id, pixels, ratio, bbox, pixel_ids)]}`` where ``frame_id``
-refers to the pose-image file name.
+This script mirrors :mod:`get_object_frame_myset` but reads images from
+``images``-style directories (e.g. ``images``, ``images_1``) found in each
+scan. If none are present it falls back to a ``pose_images`` directory or
+``pose_image_*`` files in the scan root. For every instance point cloud, we
+determine the ``top_k`` frames where it is most visible and store the results
+in ``<scan_id>_object2frame.pkl`` with the same structure as the original
+script. Each entry of the pickle file is ``{inst_id: [(frame_id, pixels,
+ratio, bbox, pixel_ids)]}`` where ``frame_id`` refers to the pose-image file
+name.
 
 Example
 -------
@@ -35,21 +37,30 @@ from .get_object_frame_myset import load_cam, projection_details
 def gather_pose_images(scan: Path) -> List[Path]:
     """Collect pose-image files for a scan.
 
-    The function first searches for a ``pose_images`` subdirectory.  If it
-    doesn't exist, it falls back to files in the scan directory whose name
-    starts with ``pose_image``.  Both ``.png`` and ``.jpg`` extensions are
-    supported.
+    The function iterates over every subdirectory whose name matches
+    ``images*`` under the scan folder, collecting files with supported image
+    extensions. If no such directories exist, it falls back to the legacy
+    ``pose_images`` directory and finally to ``pose_image_*`` files in the scan
+    root. Both ``.png`` and ``.jpg`` extensions are supported.
     """
 
-    pose_dir = scan / "pose_images"
     patterns = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG"]
     img_files: List[Path] = []
-    if pose_dir.is_dir():
-        for ptn in patterns:
-            img_files.extend(sorted(pose_dir.glob(ptn)))
+
+    img_dirs = [d for d in scan.glob("images*") if d.is_dir()]
+    if img_dirs:
+        for img_dir in img_dirs:
+            for ptn in patterns:
+                img_files.extend(sorted(img_dir.glob(ptn)))
     else:
-        for ptn in patterns:
-            img_files.extend(sorted(scan.glob(f"pose_image_{ptn}")))
+        pose_dir = scan / "pose_images"
+        if pose_dir.is_dir():
+            for ptn in patterns:
+                img_files.extend(sorted(pose_dir.glob(ptn)))
+        else:
+            for ptn in patterns:
+                img_files.extend(sorted(scan.glob(f"pose_image_{ptn}")))
+
     return sorted(img_files)
 
 
@@ -68,12 +79,17 @@ def main() -> None:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    scans = sorted([p for p in root.iterdir() if p.is_dir() and p.name.startswith("scan")])
+    scans = sorted(
+        p for p in root.iterdir() if p.is_dir() and p.name.startswith("scan")
+    )
 
     for scan in scans:
         scan_id = scan.name
         inst_paths = sorted((scan / "mask/vis_instances").glob("inst_*.ply"))
-        inst_pts = [np.asarray(o3d.io.read_point_cloud(str(p)).points) for p in inst_paths]
+        inst_pts = [
+            np.asarray(o3d.io.read_point_cloud(str(p)).points)
+            for p in inst_paths
+        ]
 
         img_files = gather_pose_images(scan)
         object2frame = {}
@@ -99,7 +115,9 @@ def main() -> None:
                 except Exception as e:
                     print(f"[WARN] {scan_id} frame {idx}: {e}")
                     continue
-                vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, w, h)
+                vis, pix_cnt, bbox, pix_ids = projection_details(
+                    pts, K, T, w, h
+                )
                 scale_x = 320.0 / float(w)
                 scale_y = 240.0 / float(h)
                 bbox = (
@@ -117,9 +135,19 @@ def main() -> None:
                         axis=1,
                     ).astype(np.uint16)
                 scores.append((idx, vis))
-                details[idx] = (img_path.name, pix_cnt, vis, bbox, pix_ids)
-            top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
-            object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
+                details[idx] = (
+                    str(img_path.relative_to(scan)),
+                    pix_cnt,
+                    vis,
+                    bbox,
+                    pix_ids,
+                )
+            top = [
+                i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]
+            ]
+            object2frame[int(inst_idx)] = [
+                details[i] for i in top if i in details
+            ]
 
         with open(out_dir / f"{scan_id}_object2frame.pkl", "wb") as fw:
             pickle.dump(object2frame, fw)
