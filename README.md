@@ -84,6 +84,18 @@ The script writes `relationships_<split>_full.json` and the merged feature
 files into the chosen output directory. These can be used with
 `--load_features` for training large scenes.
 
+## Query Node Features
+
+After running `precompute_2d_features`, node embeddings can be searched with a
+text query and exported as a colourised point cloud:
+
+```bash
+python open3dsg/scripts/query_node_features.py --features <feature_dir> --graph <data_dict.pkl> --scene <scene_id> --word "chair" --topk 5 --out_ply query.ply --log query.txt
+```
+
+The command selects the top matching nodes, writes them to `query.ply` with
+unique colours and logs their indices with similarity scores to `query.txt`.
+
 ## Batch OpenSeg Image Processing
 
 To encode a directory of images with the OpenSeg model and store per-pixel features and a colourised segmentation map run:
