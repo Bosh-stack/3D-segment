@@ -82,7 +82,7 @@ def load_embeddings(feature_dir: str, scene_id: str) -> tuple[torch.Tensor, torc
     embeddings = torch.load(emb_path, map_location="cpu")
     valids = torch.load(valid_path, map_location="cpu").bool()
     valid_idx = torch.nonzero(valids, as_tuple=False).squeeze(1)
-    embeddings = embeddings[valid_idx]
+    embeddings = embeddings[valid_idx].float()
     model_name = obj_dir.split("export_obj_clip_emb_clip_")[1]
     return embeddings, valid_idx, model_name
 
@@ -129,7 +129,7 @@ def assign_colors(n: int) -> np.ndarray:
 def main() -> None:
     args = parse_args()
     embeddings, valid_idx, model_name = load_embeddings(args.features, args.scene)
-    text_emb = encode_text(args.word, model_name)
+    text_emb = encode_text(args.word, model_name).to(embeddings.dtype)
     embeddings = torch.nn.functional.normalize(embeddings, dim=1)
     text_emb = torch.nn.functional.normalize(text_emb, dim=1)
     sims = (embeddings @ text_emb.t()).squeeze(1)
