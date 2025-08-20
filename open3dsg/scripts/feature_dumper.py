@@ -147,7 +147,13 @@ class FeatureDumper:
             )
 
         if self.hparams.get('blip') and _rel_imgs_empty(rel_imgs):
-            rel_imgs = data_dict.get('blip_images')
+            rel_imgs = data_dict.get("blip_images")
+            if (
+                isinstance(rel_imgs, list)
+                and len(rel_imgs) == 1
+                and isinstance(rel_imgs[0], list)
+            ):
+                rel_imgs = rel_imgs[0]
 
         rel_imgs_empty = _rel_imgs_empty(rel_imgs)
 
