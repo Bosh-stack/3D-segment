@@ -830,7 +830,11 @@ class Open2D3DSGDataset(Dataset):
             elif type(data[0][key]) is str:
                 data_dict[key] = [data[i][key] for i in range(len(data))]
             elif type(data[0][key]) is list:
-                data_dict[key] = [data[i][key] for i in range(len(data))]
+                if key == "blip_images":
+                    # Keep `[relation][frame]`; just unwrap batch
+                    data_dict[key] = data[0][key]
+                else:
+                    data_dict[key] = [d[key] for d in data]
             elif type(data[0][key]) is torch.Tensor:
                 data_dict[key] = torch.stack([data[i][key] for i in range(len(data))])
             elif type(data[0][key]) is np.ndarray:
