@@ -179,8 +179,13 @@ def project_points(pts_cam: np.ndarray, K: np.ndarray):
 
 
 def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray, w: int, h: int) -> float:
+    """Return the fraction of points that fall inside the image.
+
+    ``T_world_cam`` is expected to transform points from world coordinates into
+    the camera coordinate system (``world→camera``).
+    """
     pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
-    pts_cam = (np.linalg.inv(T_world_cam) @ pts_world_h.T).T[:, :3]
+    pts_cam = (T_world_cam @ pts_world_h.T).T[:, :3]
     infront = pts_cam[:, 2] > 0
     if not np.any(infront):
         return 0.0
@@ -190,9 +195,12 @@ def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarr
 
 
 def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray, w: int, h: int):
-    """Project ``points_world`` into the image and compute visibility stats."""
+    """Project ``points_world`` into the image and compute visibility stats.
+
+    ``T_world_cam`` must already represent the ``world→camera`` transformation.
+    """
     pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
-    pts_cam = (np.linalg.inv(T_world_cam) @ pts_world_h.T).T[:, :3]
+    pts_cam = (T_world_cam @ pts_world_h.T).T[:, :3]
     infront = pts_cam[:, 2] > 0
     if not np.any(infront):
         return 0.0, 0, (0, 0, 0, 0), np.zeros((0, 2), dtype=np.uint16)

@@ -42,10 +42,10 @@ def _save_log(cache):
     LOG_PATH.write_text(json.dumps(cache, indent=2))
 
 
-def _project(points: np.ndarray, K: np.ndarray, T: np.ndarray):
-    """Project ``points`` (Nx3) using intrinsics ``K`` and extrinsics ``T``."""
+def _project(points: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray):
+    """Project ``points`` using intrinsics ``K`` and a world→camera transform."""
     pts_h = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)
-    cam = (np.linalg.inv(T) @ pts_h.T).T[:, :3]
+    cam = (T_world_cam @ pts_h.T).T[:, :3]
     in_front = cam[:, 2] > 0
     cam = cam[in_front]
     pix = (K @ cam.T).T
@@ -69,10 +69,10 @@ def _load_instance_from_scene(scene: o3d.geometry.PointCloud, inst_id: int):
     return pc
 
 
-def merge_pcs(pc_a, pc_b, score_a, score_b, K, T, width, height):
+def merge_pcs(pc_a, pc_b, score_a, score_b, K, T_world_cam, width, height):
     """Merge two point clouds based on 2D pixel overlap."""
-    uv_a, mask_a = _project(np.asarray(pc_a.points), K, T)
-    uv_b, mask_b = _project(np.asarray(pc_b.points), K, T)
+    uv_a, mask_a = _project(np.asarray(pc_a.points), K, T_world_cam)
+    uv_b, mask_b = _project(np.asarray(pc_b.points), K, T_world_cam)
 
     keep_a = np.ones(mask_a.sum(), dtype=bool)
     keep_b = np.ones(mask_b.sum(), dtype=bool)
@@ -112,8 +112,8 @@ def merge_pcs(pc_a, pc_b, score_a, score_b, K, T, width, height):
     return merged
 
 
-def _visible_count(pc: o3d.geometry.PointCloud, K, T, w, h):
-    uv, mask = _project(np.asarray(pc.points), K, T)
+def _visible_count(pc: o3d.geometry.PointCloud, K, T_world_cam, w, h):
+    uv, mask = _project(np.asarray(pc.points), K, T_world_cam)
     if uv.size == 0:
         return 0
     x_valid = (uv[:, 0] >= 0) & (uv[:, 0] < w)
@@ -160,7 +160,7 @@ def main():
 
     if args.image_idx is not None:
         meta = args.scan_dir / f"im_metadata_{args.image_idx}.json"
-        K, T, w, h = load_cam(meta)
+        K, T_world_cam, w, h = load_cam(meta)
     else:
         cache = _load_log()
         key = _cache_key(args)
@@ -170,29 +170,29 @@ def main():
             print(
                 f"Loaded frame {meta} with {best_score} visible points from log"
             )
-            K, T, w, h = load_cam(meta)
+            K, T_world_cam, w, h = load_cam(meta)
         else:
             best_meta = None
             best_score = -1
             for meta in sorted(args.scan_dir.glob("im_metadata_*.json")):
-                K, T, w, h = load_cam(meta)
-                score = _visible_count(pc_a, K, T, w, h) + _visible_count(
-                    pc_b, K, T, w, h
+                K, T_world_cam, w, h = load_cam(meta)
+                score = _visible_count(pc_a, K, T_world_cam, w, h) + _visible_count(
+                    pc_b, K, T_world_cam, w, h
                 )
                 if score > best_score:
                     best_meta = meta
                     best_score = score
-                    best_cam = (K, T, w, h)
+                    best_cam = (K, T_world_cam, w, h)
             if best_meta is None:
                 raise RuntimeError("No camera metadata files found")
             print(
                 f"Selected frame {best_meta} with {best_score} visible points"
             )
-            K, T, w, h = best_cam
+            K, T_world_cam, w, h = best_cam
             cache[key] = {"meta": str(best_meta), "score": best_score}
             _save_log(cache)
 
-    merged = merge_pcs(pc_a, pc_b, score_a, score_b, K, T, w, h)
+    merged = merge_pcs(pc_a, pc_b, score_a, score_b, K, T_world_cam, w, h)
     o3d.io.write_point_cloud(str(args.output), merged)
     print(f"Merged point cloud written to {args.output}")
 
