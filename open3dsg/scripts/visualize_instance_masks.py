@@ -84,8 +84,9 @@ def main() -> None:
             img = Image.open(Path(args.scan_dir) / rel_path).convert("RGB")
             img = img.resize((320, 240))
             blended = overlay_mask(img, np.asarray(pix_ids))
-            out_file = out_dir / f"inst_{inst_id}_frame_{frame_idx}.png"
+            out_file = out_dir / f"{inst_id}.png"
             blended.save(out_file)
+            break
 
 
 if __name__ == "__main__":
