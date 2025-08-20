@@ -332,6 +332,8 @@ class Open2D3DSGDataset(Dataset):
 
             if dataset == 'scannet':
                 imgs = [Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1])) for s in selected]
+            elif dataset == 'myset':
+                imgs = [Image.open(os.path.join(CONF.PATH.MYSET_ROOT, scene_id, s[1])).resize((320, 240)) for s in selected]
             else:
                 imgs = [Image.open(_resolve_r3scan_frame(scene_id, s[1])).resize((224, 172)) for s in selected]
 
@@ -411,6 +413,9 @@ class Open2D3DSGDataset(Dataset):
             # selected = sorted(zip(vis,frames,pixel_ids))[-top_k:]
             if dataset == 'scannet':
                 imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.SCANNET_RAW, "scannet_2d", scene_id, "color", s[1]))
+                                  .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
+            elif dataset == 'myset':
+                imgs = [np.asarray(Image.open(os.path.join(CONF.PATH.MYSET_ROOT, scene_id, s[1]))
                                   .resize((blank_img_dim[1], blank_img_dim[0]))) for s in selected]
             else:
                 imgs = [np.asarray(Image.open(_resolve_r3scan_frame(scene_id, s[1]))
