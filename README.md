@@ -62,7 +62,7 @@ python open3dsg/scripts/visualize_instance_masks.py --scan_dir <scan_dir> \
     --object2frame <scan_id>_object2frame.pkl --out vis --top_k 3
 ```
 
-This writes files like `inst_12_frame_0.png` to the output directory.
+This writes files like `42.png` to the output directory.
 
 ### Model Downloads
 
