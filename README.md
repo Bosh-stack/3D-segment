@@ -52,6 +52,18 @@ python open3dsg/scripts/reconstruct_pointcloud.py --graph <data_dict.pkl> --out 
 
 The script expects the graph dictionaries produced by [open3dsg/data/preprocess_scannet.py](open3dsg/data/preprocess_scannet.py) or [open3dsg/data/preprocess_3rscan.py](open3dsg/data/preprocess_3rscan.py). The output format is inferred from the `--out` extension (`.ply` or `.npz`).
 
+## Visualize Instance Masks
+
+Overlay projected pixel indices from `*_object2frame.pkl` files onto their
+corresponding RGB frames:
+
+```bash
+python open3dsg/scripts/visualize_instance_masks.py --scan_dir <scan_dir> \
+    --object2frame <scan_id>_object2frame.pkl --out vis --top_k 3
+```
+
+This writes files like `inst_12_frame_0.png` to the output directory.
+
 ### Model Downloads
 
 Download the [OpenSeg Checkpoint](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/openseg), [BLIP2 Positional Embedding](https://drive.google.com/file/d/1BfvxB6eo3XksE6AfMUgoBHwzVYce1ed1/view?usp=sharing) & pre-trained [PointNet/PointNet2 weights](https://drive.google.com/drive/folders/1PrnJVMpJVVh4MAV4yPRuRByhBu-DuXwH?usp=sharing) and put them the checkpoints directory selected in the config file.
