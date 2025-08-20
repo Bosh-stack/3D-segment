@@ -149,7 +149,7 @@ def read_scan_info_R3SCAN(scan_id, mode='depth'):
         color_list.append(np.array(plt.imread(color_path)))
 
         image_list.append(cv2.imread(frame_path, -1).reshape(-1))
-        # inverce the extrinsic matrix, from camera_2_world to world_2_camera
+        # stored poses are already world→camera transforms
         extrinsic = np.matrix(read_extrinsic(extrinsic_path))
         extrinsic_list.append(extrinsic)
 
@@ -300,8 +300,8 @@ def image_3d_mapping(scan, image_list, color_list, img_names, point_cloud, insta
 
     squeezed_instances = instances.squeeze()
     image_dim = np.array([image_width, image_height])
-    for i, (extrinsic, depth, color) in enumerate(zip(extrinsics, image_list, color_list)):
-        world_to_camera = np.linalg.inv(extrinsic)
+    for i, (world_to_camera, depth, color) in enumerate(zip(extrinsics, image_list, color_list)):
+        # ``extrinsics`` already store world→camera transforms
         depth = depth.reshape(image_dim[::-1])/1000
         for inst in instance_names.keys():
             locs_in = point_cloud[squeezed_instances == int(inst)]
