@@ -92,6 +92,7 @@ def _process_scan(scan: Path, out_root: Path, symlink: bool) -> None:
         if not img.exists():
             print(f"[WARN] {meta_file}: {img.name} not found; skipping frame")
             continue
+        sub_dir = meta_file.parent.name  # e.g. "images10"
 
         # pose
         try:
@@ -111,22 +112,26 @@ def _process_scan(scan: Path, out_root: Path, symlink: bool) -> None:
         fy = float(f) / float(ph)
         K = [[fx, 0.0, float(cx)], [0.0, fy, float(cy)], [0.0, 0.0, 1.0]]
 
-        _link_or_copy(img, scene_dir / "color" / f"{idx}.jpg", symlink)
+        _link_or_copy(img, scene_dir / "color" / sub_dir / img.name, symlink)
 
         depth = meta_file.parent / f"depth_{idx}.png"
         if depth.exists():
-            _link_or_copy(depth, scene_dir / "depth" / f"{idx}.png", symlink)
+            _link_or_copy(depth, scene_dir / "depth" / sub_dir / depth.name, symlink)
 
-        _write_matrix(scene_dir / "pose" / f"{idx}.txt", pose)
-        intrinsics[idx] = K
+        pose_path = scene_dir / "pose" / sub_dir / f"{idx}.txt"
+        pose_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_matrix(pose_path, pose)
+        intrinsics[idx] = (K, sub_dir)
 
     if intrinsics:
-        first = next(iter(intrinsics.values()))
-        if all(intr == first for intr in intrinsics.values()):
-            _write_matrix(scene_dir / "intrinsic" / "intrinsic_color.txt", first)
+        first_mat, _ = next(iter(intrinsics.values()))
+        if all(intr[0] == first_mat for intr in intrinsics.values()):
+            _write_matrix(scene_dir / "intrinsic" / "intrinsic_color.txt", first_mat)
         else:
-            for idx, intr in intrinsics.items():
-                _write_matrix(scene_dir / "intrinsic" / f"{idx}.txt", intr)
+            for idx, (intr, sub_dir) in intrinsics.items():
+                intr_path = scene_dir / "intrinsic" / sub_dir / f"{idx}.txt"
+                intr_path.parent.mkdir(parents=True, exist_ok=True)
+                _write_matrix(intr_path, intr)
 
 
 def main() -> None:
