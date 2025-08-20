@@ -94,7 +94,18 @@ def _intrinsics_from_fov(m: dict) -> Tuple[np.ndarray, int, int]:
 
 
 def load_cam(meta_file: Path):
-    """Load intrinsics/extrinsics from flexible JSON schemas."""
+    """Load intrinsics and extrinsics from flexible JSON schemas.
+
+    The extrinsics stored in ``meta_file`` are assumed to transform points from
+    the camera coordinate system to the world coordinate system
+    (``camera→world``).  This helper converts them into a ``world→camera``
+    transform before returning the result.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, int, int]
+        ``K`` (3x3), ``T_world_cam`` (4x4), image width and height.
+    """
     m = json.loads(meta_file.read_text())
 
     # -------- intrinsics --------
@@ -164,7 +175,11 @@ def load_cam(meta_file: Path):
     if T is None:
         raise KeyError("Camera extrinsics not found in metadata")
 
-    return K, T, int(w), int(h)
+    # Metadata typically provides a camera→world matrix; invert it so that the
+    # returned transform maps world coordinates into the camera frame.
+    T_world_cam = np.linalg.inv(T)
+
+    return K, T_world_cam, int(w), int(h)
 
 
 # -----------------------------
@@ -275,11 +290,11 @@ def main():
                 if not meta.exists():
                     continue
                 try:
-                    K, T, w, h = load_cam(meta)
+                    K, T_world_cam, w, h = load_cam(meta)
                 except Exception as e:
                     print(f"[WARN] {scan_id} frame {idx}: {e}")
                     continue
-                vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, w, h)
+                vis, pix_cnt, bbox, pix_ids = projection_details(pts, K, T_world_cam, w, h)
                 # normalize pixel coordinates to 320x240 so downstream loaders
                 # can directly index the resized features
                 scale_x = 320.0 / float(w)
