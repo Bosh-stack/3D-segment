@@ -6,8 +6,7 @@ This script mirrors :mod:`get_object_frame_myset` but reads images from a
 we determine the ``top_k`` frames where it is most visible and store the
 results in ``<scan_id>_object2frame.pkl`` with the same structure as the
 original script.  Each entry of the pickle file is
-``{inst_id: [(frame_id, pixels, ratio, bbox, pixel_ids)]}`` where ``frame_id``
-refers to the pose-image file name.
+``{idx: [(frame_id, pixels, ratio, bbox, pixel_ids)], "names": {idx: inst_name}}`` where ``frame_id`` refers to the pose-image file name.
 
 Example
 -------
@@ -77,6 +76,7 @@ def main() -> None:
 
         img_files = gather_pose_images(scan)
         object2frame = {}
+        name_map = {}
 
         for inst_idx, pts in enumerate(inst_pts):
             scores = []
@@ -120,9 +120,11 @@ def main() -> None:
                 details[idx] = (img_path.name, pix_cnt, vis, bbox, pix_ids)
             top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
             object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
+            name_map[int(inst_idx)] = inst_paths[inst_idx].stem
 
+        data = {"names": name_map, **object2frame}
         with open(out_dir / f"{scan_id}_object2frame.pkl", "wb") as fw:
-            pickle.dump(object2frame, fw)
+            pickle.dump(data, fw)
         print(f"{scan_id}: {len(inst_paths)} instances processed")
 
 
