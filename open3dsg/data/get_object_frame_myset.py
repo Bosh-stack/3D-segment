@@ -278,6 +278,7 @@ def main():
         object2frame = {}
 
         for inst_idx, pts in enumerate(inst_pts):
+            inst_id = inst_paths[inst_idx].stem
             scores = []
             details = {}
             for img_path in img_files:
@@ -324,7 +325,7 @@ def main():
                     pix_ids,
                 )
             top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
-            object2frame[int(inst_idx)] = [details[i] for i in top if i in details]
+            object2frame[inst_id] = [details[i] for i in top if i in details]
 
         with open(out_dir / f"{scan_id}_object2frame.pkl", "wb") as fw:
             pickle.dump(object2frame, fw)
