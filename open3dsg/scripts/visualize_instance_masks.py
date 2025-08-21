@@ -52,10 +52,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_mapping(path: str | Path) -> dict:
+def load_mapping(path: str | Path) -> tuple[dict[int, list], dict[int, str]]:
     with open(path, "rb") as fh:
         data = pickle.load(fh)
-    return {str(k): v for k, v in data.items()}
+    name_map = data.pop("names", {})
+    obj2frame = {int(k): v for k, v in data.items()}
+    name_map = {int(k): str(v) for k, v in name_map.items()}
+    return obj2frame, name_map
 
 
 def iter_frames(frames: Iterable, top_k: int | None) -> Iterable[tuple[int, tuple]]:
@@ -80,12 +83,13 @@ def overlay_mask(image: Image.Image, pix_ids: np.ndarray) -> Image.Image:
 
 def main() -> None:
     args = parse_args()
-    obj2frame = load_mapping(args.object2frame)
+    obj2frame, name_map = load_mapping(args.object2frame)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir / "visibility.log", "w") as log:
-        for inst_id, frames in obj2frame.items():
+        for inst_idx, frames in obj2frame.items():
+            inst_name = name_map.get(inst_idx, str(inst_idx))
             for frame_idx, (rel_path, _pix_cnt, vis, bbox, pix_ids) in iter_frames(
                 frames, args.top_k
             ):
@@ -94,9 +98,9 @@ def main() -> None:
                 blended = overlay_mask(img, np.asarray(pix_ids))
                 draw = ImageDraw.Draw(blended)
                 draw.rectangle(bbox, outline="yellow", width=2)
-                out_file = out_dir / f"{inst_id}_{frame_idx}.png"
+                out_file = out_dir / f"{inst_name}_{frame_idx}.png"
                 blended.save(out_file)
-                log.write(f"{inst_id}: {vis}\n")
+                log.write(f"{inst_name}: {vis}\n")
 
 
 if __name__ == "__main__":

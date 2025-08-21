@@ -7,9 +7,10 @@ supports the more relaxed camera metadata found in the custom *myset* dataset.
 All projections assume the camera looks along its negative ``z`` axis.
 
 The output for every scan is a ``pickle`` file named ``<scan_id>_object2frame.pkl``
-containing a dictionary ``{inst_id: [(frame_id, pixels, ratio, bbox, pixel_ids)]}``.
-Each tuple mimics the structure expected by the legacy preprocessing pipeline so
-that downstream tools (e.g. ``preprocess_3rscan.py``) can operate on the data.
+containing a dictionary ``{idx: [(frame_id, pixels, ratio, bbox, pixel_ids)],
+"names": {idx: inst_name}}``.  Each tuple mimics the structure expected by the
+legacy preprocessing pipeline so that downstream tools (e.g.
+``preprocess_3rscan.py``) can operate on the data.
 
 Camera metadata can be provided in various schemas:
 
@@ -284,6 +285,7 @@ def main():
 
         img_files = gather_images(scan)
         object2frame = {}
+        name_map = {}
 
         for inst_idx, pts in enumerate(inst_pts):
             inst_id = inst_paths[inst_idx].stem
@@ -333,10 +335,12 @@ def main():
                     pix_ids,
                 )
             top = [i for i, _ in sorted(scores, key=lambda x: -x[1])[: args.top_k]]
-            object2frame[inst_id] = [details[i] for i in top if i in details]
+            object2frame[inst_idx] = [details[i] for i in top if i in details]
+            name_map[inst_idx] = inst_id
 
+        data = {"names": name_map, **object2frame}
         with open(out_dir / f"{scan_id}_object2frame.pkl", "wb") as fw:
-            pickle.dump(object2frame, fw)
+            pickle.dump(data, fw)
         print(f"{scan_id}: {len(inst_paths)} instances processed")
 
 
