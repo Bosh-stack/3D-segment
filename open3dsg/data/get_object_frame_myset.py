@@ -4,6 +4,7 @@
 This script associates each 3D instance with the ``top_k`` RGB frames where the
 object is the most visible.  It is modelled after :mod:`get_object_frame.py` but
 supports the more relaxed camera metadata found in the custom *myset* dataset.
+All projections assume the camera looks along its negative ``z`` axis.
 
 The output for every scan is a ``pickle`` file named ``<scan_id>_object2frame.pkl``
 containing a dictionary ``{inst_id: [(frame_id, pixels, ratio, bbox, pixel_ids)]}``.
@@ -187,9 +188,13 @@ def load_cam(meta_file: Path):
 # -----------------------------
 
 def project_points(pts_cam: np.ndarray, K: np.ndarray):
+    """Project camera-frame points using a ``-z`` forward convention."""
     zs = pts_cam[:, 2]
-    uvs = (K @ pts_cam[:, :3].T).T
-    uvs = uvs[:, :2] / zs[:, None]
+    depth = -zs
+    xy_norm = pts_cam[:, :2] / depth[:, None]
+    uvs = np.empty_like(xy_norm)
+    uvs[:, 0] = xy_norm[:, 0] * K[0, 0] + K[0, 2]
+    uvs[:, 1] = xy_norm[:, 1] * K[1, 1] + K[1, 2]
     return uvs, zs
 
 
@@ -197,26 +202,28 @@ def visible_ratio(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarr
     """Return the fraction of points that fall inside the image.
 
     ``T_world_cam`` is expected to transform points from world coordinates into
-    the camera coordinate system (``world→camera``).
+    the camera coordinate system (``world→camera``) where the camera looks along
+    its negative ``z`` axis.
     """
     pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
     pts_cam = (T_world_cam @ pts_world_h.T).T[:, :3]
-    infront = pts_cam[:, 2] > 0
+    infront = pts_cam[:, 2] < 0
     if not np.any(infront):
         return 0.0
     uvs, _ = project_points(pts_cam[infront], K)
     inside = (uvs[:, 0] >= 0) & (uvs[:, 0] < w) & (uvs[:, 1] >= 0) & (uvs[:, 1] < h)
-    return float(inside.sum()) / float(points_world.shape[0])
+    return float(inside.sum()) / float(infront.sum())
 
 
 def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray, w: int, h: int):
     """Project ``points_world`` into the image and compute visibility stats.
 
-    ``T_world_cam`` must already represent the ``world→camera`` transformation.
+    ``T_world_cam`` must already represent the ``world→camera`` transformation
+    with a negative ``z`` forward convention.
     """
     pts_world_h = np.concatenate([points_world, np.ones((points_world.shape[0], 1))], axis=1)
     pts_cam = (T_world_cam @ pts_world_h.T).T[:, :3]
-    infront = pts_cam[:, 2] > 0
+    infront = pts_cam[:, 2] < 0
     if not np.any(infront):
         return 0.0, 0, (0, 0, 0, 0), np.zeros((0, 2), dtype=np.uint16)
 
@@ -225,7 +232,7 @@ def projection_details(points_world: np.ndarray, K: np.ndarray, T_world_cam: np.
     if not np.any(inside):
         return 0.0, 0, (0, 0, 0, 0), np.zeros((0, 2), dtype=np.uint16)
 
-    vis_ratio = float(inside.sum()) / float(points_world.shape[0])
+    vis_ratio = float(inside.sum()) / float(infront.sum())
     uv_vis = uvs[inside]
     bbox = (
         int(np.clip(np.floor(uv_vis[:, 0].min()), 0, w - 1)),

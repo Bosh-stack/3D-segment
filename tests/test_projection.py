@@ -84,7 +84,7 @@ from open3dsg.data.get_object_frame import compute_mapping, image_3d_mapping
 def test_projection_details_identity():
     K = np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 40.0], [0.0, 0.0, 1.0]], dtype=np.float32)
     T = np.eye(4, dtype=np.float32)
-    pts = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+    pts = np.array([[0.0, 0.0, -1.0]], dtype=np.float32)
     ratio = visible_ratio(pts, K, T, 100, 80)
     assert ratio == 1.0
     ratio2, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, 100, 80)
