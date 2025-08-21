@@ -77,6 +77,16 @@ python scripts/save_frame_projections.py --scan_dir <scan_dir> --instance <inst.
 The command writes bounding boxes onto each frame and generates a
 `frames.json` file sorted by visibility.
 
+## Find Missing Object Frames
+
+List object IDs without frame associations in the preprocessed dataset:
+
+```bash
+python scripts/find_missing_obj_frames.py
+```
+
+Use `--out results.json` to save the output instead of printing it.
+
 ### Model Downloads
 
 Download the [OpenSeg Checkpoint](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/openseg), [BLIP2 Positional Embedding](https://drive.google.com/file/d/1BfvxB6eo3XksE6AfMUgoBHwzVYce1ed1/view?usp=sharing) & pre-trained [PointNet/PointNet2 weights](https://drive.google.com/drive/folders/1PrnJVMpJVVh4MAV4yPRuRByhBu-DuXwH?usp=sharing) and put them the checkpoints directory selected in the config file.
