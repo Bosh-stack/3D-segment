@@ -15,6 +15,8 @@ Two usage modes are supported:
 For every pair of overlapping pixels in an RGB frame the point from the mask
 with the *lower* score is dropped.  If ``--image-idx`` is not supplied the
 script picks the frame where the two masks have the highest combined visibility.
+All projections follow the convention that the camera looks along its negative
+``z`` axis.
 The remaining points are written to the output ``.ply`` file.
 """
 
@@ -43,13 +45,16 @@ def _save_log(cache):
 
 
 def _project(points: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray):
-    """Project ``points`` using intrinsics ``K`` and a world→camera transform."""
+    """Project ``points`` assuming the camera looks along ``-z``."""
     pts_h = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)
     cam = (T_world_cam @ pts_h.T).T[:, :3]
-    in_front = cam[:, 2] > 0
+    in_front = cam[:, 2] < 0
     cam = cam[in_front]
-    pix = (K @ cam.T).T
-    pix = pix[:, :2] / cam[:, 2:3]
+    depth = -cam[:, 2:3]
+    xy_norm = cam[:, :2] / depth
+    pix = np.empty_like(xy_norm)
+    pix[:, 0] = xy_norm[:, 0] * K[0, 0] + K[0, 2]
+    pix[:, 1] = xy_norm[:, 1] * K[1, 1] + K[1, 2]
     return pix, in_front
 
 
