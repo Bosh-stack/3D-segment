@@ -64,6 +64,18 @@ python open3dsg/scripts/visualize_instance_masks.py --scan_dir <scan_dir> \
 
 This writes files like `42.png` to the output directory.
 
+## Save Frame Projections
+
+Compute visibility statistics for a single instance across all frames of a
+scan and store annotated images:
+
+```bash
+python scripts/save_frame_projections.py --scan_dir <scan_dir> --instance <inst.ply> --out_dir projections
+```
+
+The command writes bounding boxes onto each frame and generates a
+`frames.json` file sorted by visibility.
+
 ### Model Downloads
 
 Download the [OpenSeg Checkpoint](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/openseg), [BLIP2 Positional Embedding](https://drive.google.com/file/d/1BfvxB6eo3XksE6AfMUgoBHwzVYce1ed1/view?usp=sharing) & pre-trained [PointNet/PointNet2 weights](https://drive.google.com/drive/folders/1PrnJVMpJVVh4MAV4yPRuRByhBu-DuXwH?usp=sharing) and put them the checkpoints directory selected in the config file.
