@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,7 +48,8 @@ def parse_args() -> argparse.Namespace:
 
 def load_mapping(path: str | Path) -> dict:
     with open(path, "rb") as fh:
-        return pickle.load(fh)
+        data = pickle.load(fh)
+    return {str(k): v for k, v in data.items()}
 
 
 def iter_frames(frames: Iterable, top_k: int | None) -> Iterable[tuple[int, tuple]]:
@@ -77,16 +78,20 @@ def main() -> None:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for inst_id, frames in obj2frame.items():
-        for frame_idx, (rel_path, _pix_cnt, _vis, _bbox, pix_ids) in iter_frames(
-            frames, args.top_k
-        ):
-            img = Image.open(Path(args.scan_dir) / rel_path).convert("RGB")
-            img = img.resize((320, 240))
-            blended = overlay_mask(img, np.asarray(pix_ids))
-            out_file = out_dir / f"{inst_id}.png"
-            blended.save(out_file)
-            break
+    with open(out_dir / "visibility.log", "w") as log:
+        for inst_id, frames in obj2frame.items():
+            for frame_idx, (rel_path, _pix_cnt, vis, bbox, pix_ids) in iter_frames(
+                frames, args.top_k
+            ):
+                img = Image.open(Path(args.scan_dir) / rel_path).convert("RGB")
+                img = img.resize((320, 240))
+                blended = overlay_mask(img, np.asarray(pix_ids))
+                draw = ImageDraw.Draw(blended)
+                draw.rectangle(bbox, outline="yellow", width=2)
+                out_file = out_dir / f"{inst_id}.png"
+                blended.save(out_file)
+                log.write(f"{inst_id}: {vis}\n")
+                break
 
 
 if __name__ == "__main__":
