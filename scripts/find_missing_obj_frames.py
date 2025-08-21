@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
-"""List objects without frame associations in preprocessed pickles."""
+"""List object IDs without frame associations for a given scene."""
 
 import argparse
 import json
 import pickle
 from pathlib import Path
 
-from open3dsg.config.config import CONF
 
+def find_missing(root: Path, scene: str):
+    """Return object ids without frame associations for ``scene``."""
+    pkl_path = root / f"{scene}_object2frame.pkl"
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"Pickle file not found: {pkl_path}")
 
-def find_missing(root: Path):
-    """Return mapping of pickle file to missing object ids."""
-    missing = {}
-    for pkl_path in root.rglob("*_object2frame.pkl"):
-        with open(pkl_path, "rb") as fh:
-            obj2frame = pickle.load(fh)
-        empty = [oid for oid, frames in obj2frame.items() if not frames]
-        if empty:
-            missing[pkl_path] = empty
-    return missing
+    with open(pkl_path, "rb") as fh:
+        obj2frame = pickle.load(fh)
+    return [oid for oid, frames in obj2frame.items() if not frames]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--root",
+        required=True,
+        type=Path,
+        help="directory containing <scene>_object2frame.pkl",
+    )
+    ap.add_argument("--scene", required=True, help="scene identifier")
     ap.add_argument(
         "--out",
         type=Path,
@@ -30,17 +34,14 @@ def main():
     )
     args = ap.parse_args()
 
-    root = Path(CONF.PATH.MYSET_PREPROC_OUT)
-    missing = find_missing(root)
+    missing = find_missing(args.root, args.scene)
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
-            json.dump({str(k): v for k, v in missing.items()}, fh, indent=2)
+            json.dump(missing, fh, indent=2)
     else:
-        for pkl_path, ids in missing.items():
-            print(pkl_path)
-            for oid in ids:
-                print(f"  {oid}")
+        for oid in missing:
+            print(oid)
 
 
 if __name__ == "__main__":
