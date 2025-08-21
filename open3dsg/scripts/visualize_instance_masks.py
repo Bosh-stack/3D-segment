@@ -2,7 +2,9 @@
 
 This helper reads ``*_object2frame.pkl`` files produced by
 :mod:`open3dsg.data.get_object_frame_myset` and saves overlays of the
-stored pixel indices onto their corresponding images.
+stored pixel indices onto their corresponding images. When ``--top_k`` is
+greater than 1, multiple frames per instance are saved with filenames
+suffixed by the frame index.
 
 Example
 -------
@@ -11,6 +13,7 @@ python open3dsg/scripts/visualize_instance_masks.py \
     --scan_dir path/to/scan \
     --object2frame scan_id_object2frame.pkl \
     --out masks --top_k 3
+# outputs inst123_0.png, inst123_1.png, ...
 ```
 """
 
@@ -41,7 +44,10 @@ def parse_args() -> argparse.Namespace:
         help="output directory for visualisations",
     )
     parser.add_argument(
-        "--top_k", type=int, default=None, help="limit frames per instance to TOP_K",
+        "--top_k",
+        type=int,
+        default=None,
+        help="limit frames per instance to TOP_K; when >1, each frame is saved separately",
     )
     return parser.parse_args()
 
@@ -88,10 +94,9 @@ def main() -> None:
                 blended = overlay_mask(img, np.asarray(pix_ids))
                 draw = ImageDraw.Draw(blended)
                 draw.rectangle(bbox, outline="yellow", width=2)
-                out_file = out_dir / f"{inst_id}.png"
+                out_file = out_dir / f"{inst_id}_{frame_idx}.png"
                 blended.save(out_file)
                 log.write(f"{inst_id}: {vis}\n")
-                break
 
 
 if __name__ == "__main__":
