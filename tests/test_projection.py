@@ -84,26 +84,27 @@ from open3dsg.data.get_object_frame import compute_mapping, image_3d_mapping
 def test_projection_details_identity():
     K = np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 40.0], [0.0, 0.0, 1.0]], dtype=np.float32)
     T = np.eye(4, dtype=np.float32)
-    pts = np.array([[0.0, 0.0, -1.0]], dtype=np.float32)
+    pts = np.array([[0.0, -0.25, -1.0]], dtype=np.float32)
     ratio = visible_ratio(pts, K, T, 100, 80)
     assert ratio == 1.0
     ratio2, pix_cnt, bbox, pix_ids = projection_details(pts, K, T, 100, 80)
     assert ratio2 == 1.0
     assert pix_cnt == 1
-    assert bbox == (50, 40, 50, 40)
-    assert np.array_equal(pix_ids, np.array([[50, 40]], dtype=np.uint16))
+    assert bbox == (50, 65, 50, 65)
+    assert np.array_equal(pix_ids, np.array([[50, 65]], dtype=np.uint16))
     pix, mask = _project(pts, K, T)
     assert mask.all()
-    assert np.allclose(pix, np.array([[50.0, 40.0]], dtype=np.float32))
+    assert np.allclose(pix, np.array([[50.0, 65.0]], dtype=np.float32))
 
 
 def test_compute_mapping_identity():
     w2c = np.eye(4, dtype=np.float32)
-    coords = np.tile(np.array([[0.0, 0.0, 1.0]], dtype=np.float32), (13, 1))
+    coords = np.tile(np.array([[0.0, -0.9, 1.0]], dtype=np.float32), (13, 1))
     depth = np.ones((2, 2), dtype=np.float32)
     intr = np.eye(4, dtype=np.float32)
     mapping = compute_mapping(w2c, coords, depth, intr, 0, 0.05, np.array([2, 2])).T
-    assert np.all(mapping[:, :2] == 0)
+    assert np.all(mapping[:, 0] == 1)
+    assert np.all(mapping[:, 1] == 0)
     assert np.all(mapping[:, 2] == 1)
 
 
@@ -113,7 +114,7 @@ def test_image_3d_mapping_identity():
     image_list = [depth_flat]
     color_list = [np.zeros((2, 2, 3), dtype=np.uint8)]
     img_names = ['0']
-    point_cloud = np.tile(np.array([[0.0, 0.0, 1.0]], dtype=np.float32), (13, 1))
+    point_cloud = np.tile(np.array([[0.0, -0.9, 1.0]], dtype=np.float32), (13, 1))
     instances = np.ones((13, 1), dtype=int)
     instance_names = {1: 'obj'}
     intr = np.eye(4, dtype=np.float32)
@@ -124,5 +125,5 @@ def test_image_3d_mapping_identity():
     entry = obj2frame[1][0]
     assert entry[1] == 13
     assert entry[2] == 1.0
-    assert entry[3] == (0, 0, 0, 0)
-    assert np.array_equal(entry[4], np.array([[0, 0]], dtype=np.uint16))
+    assert entry[3] == (0, 1, 0, 1)
+    assert np.array_equal(entry[4], np.array([[1, 0]], dtype=np.uint16))

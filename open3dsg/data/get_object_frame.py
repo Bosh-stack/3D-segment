@@ -274,8 +274,11 @@ def compute_mapping(world_to_camera, coords, depth, intrinsic, cut_bound, vis_th
     assert coords_new.shape[0] == 4, "[!] Shape error"
 
     p = np.matmul(world_to_camera, coords_new)
+    # Camera coordinates follow a y-up convention while image rows grow
+    # downwards.  Negate the y component before applying the intrinsics so
+    # that positive camera ``y`` maps to smaller row indices.
     p[0] = (p[0] * intrinsic[0][0]) / p[2] + intrinsic[0][2]
-    p[1] = (p[1] * intrinsic[1][1]) / p[2] + intrinsic[1][2]
+    p[1] = (-p[1] * intrinsic[1][1]) / p[2] + intrinsic[1][2]
     z = p[2].copy()
     pi = np.round(p).astype(int)  # simply round the projected coordinates
     inside_mask = (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
