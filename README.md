@@ -27,6 +27,7 @@ python open3dsg/data/gen_scannet_subgraphs.py --type [train/test/validation]
 ```
 
 For the 2D-3D distillation training, we have to align the 2D frames to the 3D point clouds. Using this script we generate matching frames for each 3D instance.
+All projection utilities interpret camera coordinates as **y-up** and automatically flip the axis so that pixel rows grow downward.
 
 ```bash
 python open3dsg/data/get_object_frame.py --mode [train/test] --dataset [R3SCAN/SCANNET]

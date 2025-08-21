@@ -188,13 +188,14 @@ def load_cam(meta_file: Path):
 # -----------------------------
 
 def project_points(pts_cam: np.ndarray, K: np.ndarray):
-    """Project camera-frame points using a ``-z`` forward convention."""
+    """Project camera-frame points using a ``-z`` forward and ``y``-up convention."""
     zs = pts_cam[:, 2]
     depth = -zs
     xy_norm = pts_cam[:, :2] / depth[:, None]
     uvs = np.empty_like(xy_norm)
     uvs[:, 0] = xy_norm[:, 0] * K[0, 0] + K[0, 2]
-    uvs[:, 1] = xy_norm[:, 1] * K[1, 1] + K[1, 2]
+    # Image rows grow downwards whereas the camera uses a y-up convention.
+    uvs[:, 1] = -xy_norm[:, 1] * K[1, 1] + K[1, 2]
     return uvs, zs
 
 

@@ -45,7 +45,7 @@ def _save_log(cache):
 
 
 def _project(points: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray):
-    """Project ``points`` assuming the camera looks along ``-z``."""
+    """Project ``points`` assuming the camera looks along ``-z`` and is ``y``-up."""
     pts_h = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1)
     cam = (T_world_cam @ pts_h.T).T[:, :3]
     in_front = cam[:, 2] < 0
@@ -54,7 +54,8 @@ def _project(points: np.ndarray, K: np.ndarray, T_world_cam: np.ndarray):
     xy_norm = cam[:, :2] / depth
     pix = np.empty_like(xy_norm)
     pix[:, 0] = xy_norm[:, 0] * K[0, 0] + K[0, 2]
-    pix[:, 1] = xy_norm[:, 1] * K[1, 1] + K[1, 2]
+    # Flip the y axis because image coordinates grow downwards.
+    pix[:, 1] = -xy_norm[:, 1] * K[1, 1] + K[1, 2]
     return pix, in_front
 
 
