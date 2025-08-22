@@ -272,7 +272,16 @@ class FeatureDumper:
                 ).unsqueeze(0)
                 < clip_rel2frame_mask.unsqueeze(1)
             )
-            clip_rel_emb[~clip_rel_mask.unsqueeze(-1).unsqueeze(-1)] = np.nan
+            # ``clip_rel_mask`` has shape ``(num_rels, num_frames)``. Previously we
+            # attempted to mask invalid frames using boolean indexing which
+            # expected the mask to match the tensor's shape exactly. This caused
+            # an ``IndexError`` whenever the relation tensor did not have the same
+            # dimensions as the expanded mask. Using ``masked_fill_`` allows the
+            # mask to broadcast correctly across the token and embedding
+            # dimensions, avoiding shape mismatches.
+            clip_rel_emb.masked_fill_(
+                ~clip_rel_mask.unsqueeze(-1).unsqueeze(-1), float("nan")
+            )
             clip_rel_emb = torch.nanmean(clip_rel_emb, dim=1)
 
             clip_rel_emb_masked = torch.zeros_like(clip_rel_emb)
