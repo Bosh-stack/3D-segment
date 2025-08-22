@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import clip
+from PIL import Image
 
 from open3dsg.models.clip_utils import encode_node_images_in_batches
 
@@ -48,9 +49,20 @@ class MinimalSGPN(SGPN):
         with torch.no_grad():
             for i in range(0, len(flat_imgs), batch_size):
                 batch = flat_imgs[i : i + batch_size]
+                clean_batch = []
+                for img in batch:
+                    if isinstance(img, torch.Tensor):
+                        img = img.permute(1, 2, 0).detach().cpu().numpy()
+                    if isinstance(img, np.ndarray):
+                        img = Image.fromarray(img.astype(np.uint8))
+                    clean_batch.append(img)
                 inputs = (
-                    self.PROCESSOR(images=batch, text=None, return_tensors="pt")
-                    .to(device)
+                    self.PROCESSOR(
+                        images=clean_batch,
+                        text=None,
+                        input_data_format="channels_last",
+                        return_tensors="pt",
+                    ).to(device)
                 )
                 rel_embeds.append(self.BLIP.embedd_image(inputs["pixel_values"]))
                 torch.cuda.empty_cache()
