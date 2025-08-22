@@ -219,13 +219,16 @@ class FeatureDumper:
         if self.hparams.get('blip'):
             if rel_imgs is not None and not rel_imgs_empty:
                 data_dict['clip_rel_encoding'] = model.blip_encode_images(
-                    rel_imgs, batch_size=self.hparams.get('blip_batch_size', self.hparams.get('blip_batch', 32))
-                )
+                    rel_imgs,
+                    batch_size=self.hparams.get(
+                        'blip_batch_size', self.hparams.get('blip_batch', 32)
+                    ),
+                ).unsqueeze(0)
             else:
                 num_frames = self.hparams.get('top_k_frames', 1) * self.hparams.get('scales', 1)
                 data_dict['clip_rel_encoding'] = torch.empty(
                     (0, num_frames, 257, 1408), device=device
-                )
+                ).unsqueeze(0)
         elif self.hparams.get('llava') and rel_imgs is not None:
             data_dict['clip_rel_encoding'] = model.llava_encode_images(rel_imgs)
         elif clip_rel_feats is not None:
@@ -269,7 +272,7 @@ class FeatureDumper:
                 ).unsqueeze(0)
                 < clip_rel2frame_mask.unsqueeze(1)
             )
-            clip_rel_emb[~clip_rel_mask] = np.nan
+            clip_rel_emb[~clip_rel_mask.unsqueeze(-1).unsqueeze(-1)] = np.nan
             clip_rel_emb = torch.nanmean(clip_rel_emb, dim=1)
 
             clip_rel_emb_masked = torch.zeros_like(clip_rel_emb)
