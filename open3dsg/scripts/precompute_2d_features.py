@@ -77,6 +77,12 @@ def _parse_args():
         help="directory containing precomputed node features; if provided, node feature computation is skipped",
     )
     parser.add_argument("--gpus", type=int, default=torch.cuda.device_count())
+    parser.add_argument(
+        "--rel_chunk_size",
+        type=int,
+        default=512,
+        help="Number of relations processed per chunk when masking features",
+    )
     args = parser.parse_args()
     return args
 
@@ -177,6 +183,7 @@ def main_worker(fabric: Fabric, args):
         "sync_cuda": args.sync_cuda,
         "top_k_frames": args.top_k_frames,
         "scales": args.scales,
+        "rel_chunk_size": args.rel_chunk_size,
     }
     dumper = FeatureDumper(edge_hparams, device=fabric.local_rank)
     dumper.setup()
