@@ -32,6 +32,7 @@ All projection utilities interpret camera coordinates as **y-up** and automatica
 ```bash
 python open3dsg/data/get_object_frame.py --mode [train/test] --dataset [R3SCAN/SCANNET]
 python -m open3dsg.data.merge_instance_masks --scan <scan_id> --dataset <R3SCAN/SCANNET> --masks_dir <path_to_2d_masks>
+python -m open3dsg.data.split_instance_masks --scan <scan_id> --dataset <R3SCAN/SCANNET> --eps 0.3 --min_samples 10
 ```
 
 We pre-process the data before the training for faster data processing in the training loop.
