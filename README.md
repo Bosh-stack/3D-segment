@@ -105,6 +105,9 @@ Running with `--dump_features` only extracts the features without training and d
 In case of out of memory issues, use `--skip_edge_features` to export only the node
 features first. Afterwards run the command again with `--blip` to dump relation
 embeddings.
+The relation masking step now processes relations in chunks. Adjust
+`--rel_chunk_size` (default: 512) to reduce peak memory usage at the cost of
+additional passes over the relation features.
 
 ### Precompute Full Graphs
 

@@ -68,6 +68,12 @@ def get_args():
     parser.add_argument('--load_features', default=None, help="path to precomputed 2d features")
     parser.add_argument('--skip_edge_features', action='store_true',
                         help='Skip relation image feature computation')
+    parser.add_argument(
+        '--rel_chunk_size',
+        type=int,
+        default=512,
+        help='Number of relations processed per chunk when masking features',
+    )
 
     # model variations params
     parser.add_argument('--clip_model', default="OpenSeg", type=str,

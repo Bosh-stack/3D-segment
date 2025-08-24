@@ -88,6 +88,7 @@ class FeatureDumper:
         self.hparams = hparams
         self.hparams.setdefault("load_features", False)
         self.hparams.setdefault("test", False)
+        self.hparams.setdefault("rel_chunk_size", 512)
         self.device_index = device
         # Only keep lightweight 2D encoders.
         self.model = MinimalSGPN(self.hparams)
@@ -236,7 +237,16 @@ class FeatureDumper:
 
         return data_dict
 
-    def _mask_features(self, data_dict, clip_obj_emb, clip_rel_emb, bidx, obj_count, rel_count):
+    def _mask_features(
+        self,
+        data_dict,
+        clip_obj_emb,
+        clip_rel_emb,
+        bidx,
+        obj_count,
+        rel_count,
+        rel_chunk_size: int = 512,
+    ):
         obj_valids = None
         clip_rel_emb_masked = None
         if isinstance(clip_obj_emb, torch.Tensor):
@@ -272,20 +282,20 @@ class FeatureDumper:
                 ).unsqueeze(0)
                 < clip_rel2frame_mask.unsqueeze(1)
             )
-            # ``clip_rel_mask`` has shape ``(num_rels, num_frames)``. Previously we
-            # attempted to mask invalid frames using boolean indexing which
-            # expected the mask to match the tensor's shape exactly. This caused
-            # an ``IndexError`` whenever the relation tensor did not have the same
-            # dimensions as the expanded mask. Using ``masked_fill_`` allows the
-            # mask to broadcast correctly across the token and embedding
-            # dimensions, avoiding shape mismatches.
-            clip_rel_emb.masked_fill_(
-                ~clip_rel_mask.unsqueeze(-1).unsqueeze(-1), float("nan")
+            tokens, dim = clip_rel_emb.size(2), clip_rel_emb.size(3)
+            clip_rel_emb_masked = torch.empty(
+                (rel_count, tokens, dim), device=clip_rel_emb.device
             )
-            clip_rel_emb = torch.nanmean(clip_rel_emb, dim=1)
-
-            clip_rel_emb_masked = torch.zeros_like(clip_rel_emb)
-            clip_rel_emb_masked[clip_rel2frame_mask > 0] = clip_rel_emb[clip_rel2frame_mask > 0]
+            for start in range(0, rel_count, rel_chunk_size):
+                end = min(start + rel_chunk_size, rel_count)
+                rel_slice = clip_rel_emb[start:end]
+                mask_slice = clip_rel_mask[start:end]
+                rel_slice.masked_fill_(
+                    ~mask_slice.unsqueeze(-1).unsqueeze(-1), float("nan")
+                )
+                reduced = torch.nanmean(rel_slice, dim=1)
+                valid = clip_rel2frame_mask[start:end] > 0
+                clip_rel_emb_masked[start:end][valid] = reduced[valid]
 
         return obj_valids, clip_obj_emb, clip_rel_emb_masked
 
@@ -308,7 +318,13 @@ class FeatureDumper:
                 clip_rel_emb = data_dict['clip_rel_encoding'][bidx][:rel_count]
 
             obj_valids, clip_obj_emb, clip_rel_emb_masked = self._mask_features(
-                data_dict, clip_obj_emb, clip_rel_emb, bidx, obj_count, rel_count
+                data_dict,
+                clip_obj_emb,
+                clip_rel_emb,
+                bidx,
+                obj_count,
+                rel_count,
+                self.hparams.get("rel_chunk_size", 512),
             )
 
             obj_clip_model = (
