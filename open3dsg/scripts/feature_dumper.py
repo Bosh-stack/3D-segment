@@ -284,7 +284,9 @@ class FeatureDumper:
             )
             tokens, dim = clip_rel_emb.size(2), clip_rel_emb.size(3)
             clip_rel_emb_masked = torch.empty(
-                (rel_count, tokens, dim), device=clip_rel_emb.device
+                (rel_count, tokens, dim),
+                device=clip_rel_emb.device,
+                dtype=clip_rel_emb.dtype,
             )
             for start in range(0, rel_count, rel_chunk_size):
                 end = min(start + rel_chunk_size, rel_count)
