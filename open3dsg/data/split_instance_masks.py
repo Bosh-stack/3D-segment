@@ -1,5 +1,4 @@
 import argparse
-import os
 import pickle
 from pathlib import Path
 
@@ -8,13 +7,11 @@ import cv2
 from sklearn.cluster import DBSCAN
 
 from open3dsg.config.config import CONF
-from open3dsg.data.get_object_frame import (
-    read_pointcloud_R3SCAN,
-    read_pointcloud_scannet,
-    read_scan_info_R3SCAN,
-    read_scan_info_scannet,
-    compute_mapping,
+from open3dsg.data.myset_io import (
+    read_pointcloud_myset,
+    read_scan_info_myset,
 )
+from open3dsg.data.get_object_frame import compute_mapping
 
 
 def aggregate_point_features(points, frame_indices, depths, extrinsics, intrinsic, images):
@@ -66,25 +63,24 @@ def aggregate_point_features(points, frame_indices, depths, extrinsics, intrinsi
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Split 3D instances using pixel features and DBSCAN")
+    parser = argparse.ArgumentParser(
+        description="Split 3D instances using pixel features and DBSCAN"
+    )
     parser.add_argument("--scan", required=True, help="scan id")
-    parser.add_argument("--dataset", required=True, choices=["R3SCAN", "SCANNET"], help="dataset name")
+    parser.add_argument(
+        "--dataset", default="MYSET", choices=["MYSET"], help="dataset name"
+    )
     parser.add_argument("--eps", type=float, default=0.3, help="DBSCAN epsilon")
     parser.add_argument("--min_samples", type=int, default=10, help="DBSCAN min samples")
     args = parser.parse_args()
 
-    if args.dataset == "R3SCAN":
-        pc, inst = read_pointcloud_R3SCAN(args.scan)
-        depths, colors, extrinsics, intr_info, img_names = read_scan_info_R3SCAN(args.scan)
-        intrinsic = intr_info["m_intrinsic"]
-        views_dir = Path(CONF.PATH.R3SCAN) / "views"
-    else:
-        pc, _, inst = read_pointcloud_scannet(args.scan)
-        depths, colors, extrinsics, intr_info, img_names = read_scan_info_scannet(args.scan)
-        intrinsic = np.loadtxt(os.path.join(CONF.PATH.SCANNET_RAW2D, "intrinsics.txt"))
-        views_dir = Path(CONF.PATH.SCANNET) / "views"
+    pc, inst = read_pointcloud_myset(args.scan)
+    depths, colors, extrinsics, intrinsic, img_names = read_scan_info_myset(
+        args.scan
+    )
+    views_dir = Path(CONF.PATH.MYSET_PREPROC_OUT) / "frames"
 
-    obj2frame_file = views_dir / f"{args.scan}_object2image.pkl"
+    obj2frame_file = views_dir / f"{args.scan}_object2frame.pkl"
     if not obj2frame_file.exists():
         raise FileNotFoundError(f"{obj2frame_file} not found")
     obj2frame = pickle.load(open(obj2frame_file, "rb"))
@@ -95,6 +91,8 @@ def main():
     next_id = 1
 
     for inst_id, frames in obj2frame.items():
+        if inst_id == "names":
+            continue
         inst_id_int = int(inst_id)
         idx = np.where(inst == inst_id_int)[0]
         if idx.size == 0:
@@ -121,7 +119,7 @@ def main():
             next_id += 1
 
     np.save(views_dir / f"{args.scan}_instances_split.npy", new_labels)
-    out_file = views_dir / f"{args.scan}_object2image_split.pkl"
+    out_file = views_dir / f"{args.scan}_object2frame_split.pkl"
     with open(out_file, "wb") as fw:
         pickle.dump(new_obj2frame, fw)
     print(f"Split instances written to {out_file}")
