@@ -28,8 +28,6 @@ import numpy as np
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 
-from open3dsg.data.get_object_frame import compute_mapping
-
 
 # -----------------------------
 # Intrinsics / Extrinsics utils
@@ -193,6 +191,35 @@ def build_depth_buffer(world_to_camera: np.ndarray, points: np.ndarray, intrinsi
     if np.any(valid):
         np.minimum.at(depth, (py[valid], px[valid]), z[valid])
     return depth
+
+
+def compute_mapping(world_to_camera, coords, depth, intrinsic, cut_bound, vis_thres, image_dim):
+    mapping = np.zeros((3, coords.shape[0]), dtype=int)
+    coords_new = np.concatenate([coords, np.ones([coords.shape[0], 1])], axis=1).T
+    assert coords_new.shape[0] == 4, "[!] Shape error"
+
+    p = np.matmul(world_to_camera, coords_new)
+    # Camera coordinates follow a y-up convention while image rows grow
+    # downwards.  Negate the y component before applying the intrinsics so
+    # that positive camera ``y`` maps to smaller row indices.
+    p[0] = (p[0] * intrinsic[0][0]) / p[2] + intrinsic[0][2]
+    p[1] = (-p[1] * intrinsic[1][1]) / p[2] + intrinsic[1][2]
+    z = p[2].copy()
+    pi = np.round(p).astype(int)  # simply round the projected coordinates
+    inside_mask = (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
+        * (pi[0] < image_dim[0]-cut_bound) \
+        * (pi[1] < image_dim[1]-cut_bound)
+    depth_cur = depth[pi[1][inside_mask], pi[0][inside_mask]]
+    occlusion_mask = np.abs(depth[pi[1][inside_mask], pi[0][inside_mask]]
+                            - p[2][inside_mask]) <= \
+        vis_thres * depth_cur
+
+    inside_mask[inside_mask == True] = occlusion_mask
+    mapping[0][inside_mask] = pi[1][inside_mask]
+    mapping[1][inside_mask] = pi[0][inside_mask]
+    mapping[2][inside_mask] = 1
+
+    return mapping
 
 
 def image_3d_mapping(scan: Path, inst_paths: List[Path], inst_pts: List[np.ndarray], img_files: List[Path], top_k: int, boarder_pixels: int = 0, vis_tresh: float = 0.05):
