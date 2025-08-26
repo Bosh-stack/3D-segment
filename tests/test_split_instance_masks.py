@@ -13,14 +13,7 @@ cv2 = types.SimpleNamespace(
 )
 sys.modules['cv2'] = cv2
 
-class DummyContext:
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-torch = types.SimpleNamespace(no_grad=lambda: DummyContext())
-sys.modules['torch'] = torch
+# torch is available; no stub needed
 
 trimesh = types.SimpleNamespace(
     load=lambda *args, **kwargs: types.SimpleNamespace(vertices=np.zeros((0, 3)), metadata={'_ply_raw': {'vertex': {'data': {'objectId': np.array([])}}}}),
@@ -79,7 +72,7 @@ from open3dsg.data.split_instance_masks import aggregate_point_features
 
 
 def test_aggregate_point_features_rgb():
-    pts = np.array([[0.0, -0.9, 1.0], [1.0, 0.0, 1.0]], dtype=np.float32)
+    pts = np.array([[0.0, -0.9, -1.0], [1.0, 0.0, -1.0]], dtype=np.float32)
     depth = (np.ones((2, 2), dtype=np.float32) * 1000).reshape(-1)
     depths = np.array([depth])
     extrinsics = np.array([np.eye(4, dtype=np.float32)])
