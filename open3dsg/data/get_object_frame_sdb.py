@@ -113,44 +113,66 @@ def load_cam(meta_file: Path):
 
     # fx/fy/cx/cy flat keys
     if K is None and all(k in m for k in ("fx", "fy", "cx", "cy")):
-        K = np.array([[m["fx"], 0, m["cx"]], [0, m["fy"], m["cy"]], [0, 0, 1]], dtype=np.float32)
-        w = int(m.get("w") or m.get("width") or m.get("W") or 0)
-        h = int(m.get("h") or m.get("height") or m.get("H") or 0)
+        fx, fy, cx, cy = map(float, (m["fx"], m["fy"], m["cx"], m["cy"]))
+        K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+        w = m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
+        h = m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
 
-    # focal/pixel blocks
+    # focal/pixel/principal block
     if K is None:
         K, w, h = _intrinsics_from_focal_pixel_block(m)
 
-    # fovx/fovy
+    # FOV-based
     if K is None:
         K, w, h = _intrinsics_from_fov(m)
 
     if K is None:
-        raise KeyError("Unsupported intrinsics schema")
+        raise KeyError("Camera intrinsics not found in metadata")
 
+    # image size if still missing
     if w is None or h is None:
-        w = int(m.get("w") or m.get("width") or m.get("W"))
-        h = int(m.get("h") or m.get("height") or m.get("H"))
+        w = (m.get("image", {}) or {}).get("imageWidth") or m.get("width") or m.get("W") or m.get("w") or m.get("img_width")
+        h = (m.get("image", {}) or {}).get("imageHeight") or m.get("height") or m.get("H") or m.get("h") or m.get("img_height")
+        if w is None or h is None:
+            raise KeyError("Image width/height not found in metadata")
 
     # -------- extrinsics --------
-    T = np.eye(4, dtype=np.float32)
-    if "transform" in m:
-        T = np.array(m["transform"], dtype=np.float32).reshape(4, 4)
-    else:
-        q = m.get("rot") or m.get("quat") or m.get("quaternion")
-        t = m.get("trans") or m.get("translation")
-        if q is not None and t is not None:
-            if len(q) == 4:
-                Rm = R.from_quat(q).as_matrix()
-            else:
-                Rm = R.from_quat([q[1], q[2], q[3], q[0]]).as_matrix()
-            T[:3, :3] = Rm
-            T[:3, 3] = np.array(t)
+    T = None
 
-    # Convert camera→world to world→camera
+    # flat keys (qw,qx,qy,qz,tx,ty,tz)
+    if all(k in m for k in ("qw", "qx", "qy", "qz", "tx", "ty", "tz")):
+        quat = [m["qw"], m["qx"], m["qy"], m["qz"]]
+        rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
+        trans = np.array([m["tx"], m["ty"], m["tz"]], dtype=np.float32)
+        T = np.eye(4, dtype=np.float32)
+        T[:3, :3] = rot
+        T[:3, 3] = trans
+
+    # nested dicts (rotation{x,y,z,w}, translation{x,y,z})
+    if T is None and "rotation" in m and "translation" in m:
+        r = m["rotation"]
+        t = m["translation"]
+        quat = [r.get("w"), r.get("x"), r.get("y"), r.get("z")]
+        if None not in quat:
+            rot = R.from_quat([quat[1], quat[2], quat[3], quat[0]]).as_matrix()
+            trans = np.array([t.get("x"), t.get("y"), t.get("z")], dtype=np.float32)
+            T = np.eye(4, dtype=np.float32)
+            T[:3, :3] = rot
+            T[:3, 3] = trans
+
+    # full matrix
+    for key in ("pose", "extrinsic", "transform"):
+        if T is None and key in m:
+            T = np.array(m[key], dtype=np.float32).reshape(4, 4)
+
+    if T is None:
+        raise KeyError("Camera extrinsics not found in metadata")
+
+    # Metadata typically provides a camera→world matrix; invert it so that the
+    # returned transform maps world coordinates into the camera frame.
     T_world_cam = np.linalg.inv(T)
 
-    return K, T_world_cam, w, h
+    return K, T_world_cam, int(w), int(h)
 
 
 # -----------------------------
