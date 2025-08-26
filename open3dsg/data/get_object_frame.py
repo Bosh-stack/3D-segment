@@ -277,16 +277,15 @@ def compute_mapping(world_to_camera, coords, depth, intrinsic, cut_bound, vis_th
     # Camera coordinates follow a y-up convention while image rows grow
     # downwards.  Negate the y component before applying the intrinsics so
     # that positive camera ``y`` maps to smaller row indices.
-    p[0] = (p[0] * intrinsic[0][0]) / p[2] + intrinsic[0][2]
-    p[1] = (-p[1] * intrinsic[1][1]) / p[2] + intrinsic[1][2]
-    z = p[2].copy()
+    p[0] = (p[0] * intrinsic[0][0]) / (-p[2]) + intrinsic[0][2]
+    p[1] = (-p[1] * intrinsic[1][1]) / (-p[2]) + intrinsic[1][2]
     pi = np.round(p).astype(int)  # simply round the projected coordinates
-    inside_mask = (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
+    inside_mask = (p[2] < 0) * (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
         * (pi[0] < image_dim[0]-cut_bound) \
         * (pi[1] < image_dim[1]-cut_bound)
     depth_cur = depth[pi[1][inside_mask], pi[0][inside_mask]]
     occlusion_mask = np.abs(depth[pi[1][inside_mask], pi[0][inside_mask]]
-                            - p[2][inside_mask]) <= \
+                            - (-p[2][inside_mask])) <= \
         vis_thres * depth_cur
 
     inside_mask[inside_mask == True] = occlusion_mask

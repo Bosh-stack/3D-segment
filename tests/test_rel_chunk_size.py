@@ -1,5 +1,3 @@
-import sys
-sys.modules.pop("torch", None)
 import torch
 
 def _old_reduce(clip_rel_emb, clip_rel_mask, clip_rel2frame_mask):

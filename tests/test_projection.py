@@ -11,14 +11,7 @@ cv2 = types.SimpleNamespace(imread=lambda *args, **kwargs: np.zeros((2,2), dtype
                            COLOR_BGR2RGB=0)
 sys.modules['cv2'] = cv2
 
-class DummyContext:
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-torch = types.SimpleNamespace(no_grad=lambda: DummyContext())
-sys.modules['torch'] = torch
+# torch is available; no stub needed
 
 trimesh = types.SimpleNamespace(load=lambda *args, **kwargs: types.SimpleNamespace(vertices=np.zeros((0,3)),
                                                                              metadata={'_ply_raw': {'vertex': {'data': {'objectId': np.array([])}}}}))
@@ -99,7 +92,7 @@ def test_projection_details_identity():
 
 def test_compute_mapping_identity():
     w2c = np.eye(4, dtype=np.float32)
-    coords = np.tile(np.array([[0.0, -0.9, 1.0]], dtype=np.float32), (13, 1))
+    coords = np.tile(np.array([[0.0, -0.9, -1.0]], dtype=np.float32), (13, 1))
     depth = np.ones((2, 2), dtype=np.float32)
     intr = np.eye(4, dtype=np.float32)
     mapping = compute_mapping(w2c, coords, depth, intr, 0, 0.05, np.array([2, 2])).T
@@ -114,7 +107,7 @@ def test_image_3d_mapping_identity():
     image_list = [depth_flat]
     color_list = [np.zeros((2, 2, 3), dtype=np.uint8)]
     img_names = ['0']
-    point_cloud = np.tile(np.array([[0.0, -0.9, 1.0]], dtype=np.float32), (13, 1))
+    point_cloud = np.tile(np.array([[0.0, -0.9, -1.0]], dtype=np.float32), (13, 1))
     instances = np.ones((13, 1), dtype=int)
     instance_names = {1: 'obj'}
     intr = np.eye(4, dtype=np.float32)

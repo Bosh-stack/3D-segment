@@ -180,13 +180,13 @@ def build_depth_buffer(world_to_camera: np.ndarray, points: np.ndarray, intrinsi
         return np.full((image_dim[1], image_dim[0]), np.inf, dtype=np.float32)
     coords = np.concatenate([points, np.ones((points.shape[0], 1))], axis=1).T
     cam = world_to_camera @ coords
-    x = (cam[0] * intrinsics[0, 0]) / cam[2] + intrinsics[0, 2]
-    y = (-cam[1] * intrinsics[1, 1]) / cam[2] + intrinsics[1, 2]
+    x = (cam[0] * intrinsics[0, 0]) / (-cam[2]) + intrinsics[0, 2]
+    y = (-cam[1] * intrinsics[1, 1]) / (-cam[2]) + intrinsics[1, 2]
     px = np.round(x).astype(int)
     py = np.round(y).astype(int)
-    z = cam[2]
+    z = -cam[2]
     w, h = image_dim
-    valid = (z > 0) & (px >= cut_bound) & (py >= cut_bound) & (px < w - cut_bound) & (py < h - cut_bound)
+    valid = (cam[2] < 0) & (px >= cut_bound) & (py >= cut_bound) & (px < w - cut_bound) & (py < h - cut_bound)
     depth = np.full((h, w), np.inf, dtype=np.float32)
     if np.any(valid):
         np.minimum.at(depth, (py[valid], px[valid]), z[valid])
@@ -202,16 +202,15 @@ def compute_mapping(world_to_camera, coords, depth, intrinsic, cut_bound, vis_th
     # Camera coordinates follow a y-up convention while image rows grow
     # downwards.  Negate the y component before applying the intrinsics so
     # that positive camera ``y`` maps to smaller row indices.
-    p[0] = (p[0] * intrinsic[0][0]) / p[2] + intrinsic[0][2]
-    p[1] = (-p[1] * intrinsic[1][1]) / p[2] + intrinsic[1][2]
-    z = p[2].copy()
+    p[0] = (p[0] * intrinsic[0][0]) / (-p[2]) + intrinsic[0][2]
+    p[1] = (-p[1] * intrinsic[1][1]) / (-p[2]) + intrinsic[1][2]
     pi = np.round(p).astype(int)  # simply round the projected coordinates
-    inside_mask = (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
+    inside_mask = (p[2] < 0) * (pi[0] >= cut_bound) * (pi[1] >= cut_bound) \
         * (pi[0] < image_dim[0]-cut_bound) \
         * (pi[1] < image_dim[1]-cut_bound)
     depth_cur = depth[pi[1][inside_mask], pi[0][inside_mask]]
     occlusion_mask = np.abs(depth[pi[1][inside_mask], pi[0][inside_mask]]
-                            - p[2][inside_mask]) <= \
+                            - (-p[2][inside_mask])) <= \
         vis_thres * depth_cur
 
     inside_mask[inside_mask == True] = occlusion_mask
