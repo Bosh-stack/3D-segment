@@ -57,12 +57,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--graph", required=True, help="Path to pickled graph data")
     parser.add_argument(
-        "--embeddings", required=True, help="Path to node embedding tensor"
+        "--embedding-dir",
+        required=True,
+        help="Directory containing node and relation embedding tensors",
     )
     parser.add_argument(
         "--threshold", type=float, required=True, help="Cosine similarity threshold"
     )
     parser.add_argument("--out", required=True, help="Output path for merged graph")
+    parser.add_argument(
+        "--embedding-out",
+        required=True,
+        help="Directory to write merged embedding tensors",
+    )
     parser.add_argument(
         "--instances-out",
         required=True,
@@ -75,11 +82,15 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
 
-    input_paths = {Path(args.graph).resolve(), Path(args.embeddings).resolve()}
+    input_paths = {
+        Path(args.graph).resolve(),
+        Path(args.embedding_dir).resolve(),
+    }
     output_paths = [
         Path(args.out).resolve(),
         Path(args.instances_out).resolve(),
         Path(args.pointcloud_out).resolve(),
+        Path(args.embedding_out).resolve(),
     ]
     if len(set(output_paths)) != len(output_paths) or any(p in input_paths for p in output_paths):
         parser.error("Output paths must be distinct from inputs and from each other")
@@ -112,11 +123,13 @@ def load_embeddings(path: str) -> np.ndarray:
     return emb / norms
 
 
-def merge_nodes(graph: Dict, embeddings: np.ndarray, thr: float) -> Dict:
+def merge_nodes(
+    graph: Dict, embeddings: np.ndarray, thr: float
+) -> Tuple[Dict, Dict[int, int]]:
     edges = np.asarray(graph.get("edges", []), dtype=int)
-    if edges.size == 0:
-        return graph
     n = embeddings.shape[0]
+    if edges.size == 0:
+        return graph, {i: i for i in range(n)}
     uf = UnionFind(n)
     for s, o in edges:
         if s >= n or o >= n:
@@ -289,14 +302,76 @@ def merge_nodes(graph: Dict, embeddings: np.ndarray, thr: float) -> Dict:
             new_obj2frame.setdefault(new_id[new_idx], []).extend(frames)
         graph["object2frame"] = new_obj2frame
 
-    return graph
+    return graph, idx_map
 
 
 def main() -> None:
     args = parse_args()
+    scan_id = Path(args.graph).stem
+    obj_path = Path(
+        args.embedding_dir, "export_obj_clip_emb_clip_OpenSeg", f"{scan_id}.pt"
+    )
+    valid_path = Path(
+        args.embedding_dir, "export_obj_clip_valids", f"{scan_id}.pt"
+    )
+    rel_path = Path(
+        args.embedding_dir, "export_rel_clip_emb_clip_BLIP", f"{scan_id}.pt"
+    )
+
     graph = load_graph(args.graph)
-    embeddings = load_embeddings(args.embeddings)
-    merged = merge_nodes(graph, embeddings, args.threshold)
+    obj_emb = load_embeddings(str(obj_path))
+    if torch is None:
+        raise RuntimeError("torch is required to load .pt embeddings")
+    valids = torch.load(valid_path, map_location="cpu")
+    rel_emb = torch.load(rel_path, map_location="cpu")
+    valids = np.asarray(valids)
+    rel_emb = np.asarray(rel_emb)
+    pairs_orig = list(graph.get("pairs", []))
+    obj_ids_orig = graph.get("objects_id", list(range(obj_emb.shape[0])))
+    merged, idx_map = merge_nodes(graph, obj_emb, args.threshold)
+
+    from collections import defaultdict
+
+    emb_groups: Dict[int, List[np.ndarray]] = defaultdict(list)
+    valid_groups: Dict[int, List[np.ndarray]] = defaultdict(list)
+    for old_idx, new_idx in idx_map.items():
+        emb_groups[new_idx].append(obj_emb[old_idx])
+        valid_groups[new_idx].append(valids[old_idx])
+    if emb_groups:
+        new_obj_emb = np.stack(
+            [np.mean(emb_groups[i], axis=0) for i in range(len(emb_groups))]
+        )
+        new_valids = np.array(
+            [np.any(valid_groups[i]) for i in range(len(valid_groups))]
+        )
+    else:
+        new_obj_emb = obj_emb
+        new_valids = valids
+
+    rel_agg: Dict[Tuple[int, int], List[np.ndarray]] = defaultdict(list)
+    id_to_idx = {oid: i for i, oid in enumerate(obj_ids_orig)}
+    for i, (a_id, b_id) in enumerate(pairs_orig):
+        ia = idx_map[id_to_idx[a_id]]
+        ib = idx_map[id_to_idx[b_id]]
+        if ia == ib:
+            continue
+        rel_agg[(ia, ib)].append(rel_emb[i])
+    if merged.get("edges"):
+        new_rel_emb = np.stack(
+            [np.mean(rel_agg[(ia, ib)], axis=0) for ia, ib in merged["edges"]]
+        )
+    else:
+        new_rel_emb = np.zeros((0,) + rel_emb.shape[1:], dtype=rel_emb.dtype)
+
+    obj_out_dir = Path(args.embedding_out, "export_obj_clip_emb_clip_OpenSeg")
+    obj_out_dir.mkdir(parents=True, exist_ok=True)
+    valid_out_dir = Path(args.embedding_out, "export_obj_clip_valids")
+    valid_out_dir.mkdir(parents=True, exist_ok=True)
+    rel_out_dir = Path(args.embedding_out, "export_rel_clip_emb_clip_BLIP")
+    rel_out_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(torch.as_tensor(new_obj_emb), obj_out_dir / f"{scan_id}.pt")
+    torch.save(torch.as_tensor(new_valids), valid_out_dir / f"{scan_id}.pt")
+    torch.save(torch.as_tensor(new_rel_emb), rel_out_dir / f"{scan_id}.pt")
 
     import open3d as o3d
 
