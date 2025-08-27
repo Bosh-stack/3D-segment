@@ -6,7 +6,9 @@ nodes.  Nodes whose similarity exceeds a user defined threshold are merged
 using a union--find data structure.  During merging the point clouds are
 aggregated in global coordinates and re-normalised.  Relationship lists are
 rebuilt without duplicates and the resulting graph is written back in the
-original pickle based format.
+original pickle based format.  Optionally the merged instance point clouds
+and the concatenated full point cloud can be exported to ``.ply``/``.npz``
+files.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+from open3dsg.scripts.reconstruct_pointcloud import save_points
 
 try:  # optional dependency used for loading embeddings
     import torch
@@ -61,7 +65,27 @@ def parse_args() -> argparse.Namespace:
         "--threshold", type=float, required=True, help="Cosine similarity threshold"
     )
     parser.add_argument("--out", required=True, help="Output path for merged graph")
-    return parser.parse_args()
+    parser.add_argument(
+        "--instances-out",
+        required=True,
+        help="Directory to write merged instance .ply files",
+    )
+    parser.add_argument(
+        "--pointcloud-out",
+        required=True,
+        help="Output file for merged full point cloud (.ply or .npz)",
+    )
+    args = parser.parse_args()
+
+    input_paths = {Path(args.graph).resolve(), Path(args.embeddings).resolve()}
+    output_paths = [
+        Path(args.out).resolve(),
+        Path(args.instances_out).resolve(),
+        Path(args.pointcloud_out).resolve(),
+    ]
+    if len(set(output_paths)) != len(output_paths) or any(p in input_paths for p in output_paths):
+        parser.error("Output paths must be distinct from inputs and from each other")
+    return args
 
 
 def load_graph(path: str) -> Dict:
@@ -275,6 +299,46 @@ def main() -> None:
     graph = load_graph(args.graph)
     embeddings = load_embeddings(args.embeddings)
     merged = merge_nodes(graph, embeddings, args.threshold)
+
+    import open3d as o3d
+
+    inst_dir = Path(args.instances_out)
+    inst_dir.mkdir(parents=True, exist_ok=True)
+
+    points_all: List[np.ndarray] = []
+    if "objects_pcl_glob" in merged and len(merged["objects_pcl_glob"]) > 0:
+        obj_pcls = np.asarray(merged["objects_pcl_glob"], dtype=np.float32)
+        for idx, obj in enumerate(obj_pcls):
+            pts = np.asarray(obj, dtype=np.float32)
+            points_all.append(pts[:, :3])
+            pcl = o3d.geometry.PointCloud()
+            pcl.points = o3d.utility.Vector3dVector(pts[:, :3])
+            if pts.shape[1] >= 6:
+                pcl.colors = o3d.utility.Vector3dVector(pts[:, 3:6])
+            o3d.io.write_point_cloud(str(inst_dir / f"instance_{idx:04d}.ply"), pcl)
+    else:
+        obj_pcls = np.asarray(merged["objects_pcl"], dtype=np.float32)
+        centers = np.asarray(merged["objects_center"], dtype=np.float32)
+        scales = merged.get("objects_scale")
+        if scales is not None:
+            scales = np.asarray(scales, dtype=np.float32)
+        for idx, obj in enumerate(obj_pcls):
+            pts = obj.copy()
+            coords = pts[:, :3]
+            if scales is not None:
+                coords = coords * np.asarray(scales[idx]).reshape(1, -1)
+            coords = coords + centers[idx]
+            pts[:, :3] = coords
+            points_all.append(coords)
+            pcl = o3d.geometry.PointCloud()
+            pcl.points = o3d.utility.Vector3dVector(pts[:, :3])
+            if pts.shape[1] >= 6:
+                pcl.colors = o3d.utility.Vector3dVector(pts[:, 3:6])
+            o3d.io.write_point_cloud(str(inst_dir / f"instance_{idx:04d}.ply"), pcl)
+
+    full_points = np.concatenate(points_all, axis=0)
+    save_points(full_points, args.pointcloud_out)
+
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
