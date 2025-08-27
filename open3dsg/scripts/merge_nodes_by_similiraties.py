@@ -1,14 +1,16 @@
-"""Merge graph nodes based on embedding similarity.
+""""
+Merge graph nodes based on embedding similarity.
 
 This utility loads a pickled scene graph and a tensor of node embeddings.
 Existing edges are used to compute cosine similarities between connected
-nodes.  Nodes whose similarity exceeds a user defined threshold are merged
-using a union--find data structure.  During merging the point clouds are
-aggregated in global coordinates and re-normalised.  Relationship lists are
-rebuilt without duplicates and the resulting graph is written back in the
-original pickle based format.  Optionally the merged instance point clouds
-and the concatenated full point cloud can be exported to ``.ply``/``.npz``
-files.
+nodes. Nodes whose similarity exceeds a user defined threshold are merged
+using a union--find data structure. During merging the point clouds are
+aggregated in global coordinates and re-normalised. Relationship lists are
+rebuilt by coalescing parallel edges (same ordered node pair), aggregating
+side attributes, and averaging edge embeddings on the unit sphere.
+The resulting graph is written back in the original pickle format. Optionally
+the merged instance point clouds and the concatenated full point cloud can be
+exported to ``.ply``/``.npz`` files.
 """
 
 from __future__ import annotations
@@ -49,6 +51,18 @@ class UnionFind:
         else:
             self.parent[yr] = xr
             self.rank[xr] += 1
+
+
+def spherical_mean(vecs: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """
+    Unweighted spherical mean (normalize -> average -> re-normalize).
+    Returns the unit vector mean; caller may compute resultant length if needed.
+    """
+    V = np.asarray(vecs, dtype=np.float32)
+    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + eps)
+    M = V.sum(axis=0)
+    n = np.linalg.norm(M) + eps
+    return M / n
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,15 +117,22 @@ def load_graph(path: str) -> Dict:
 
 
 def load_embeddings(path: str) -> np.ndarray:
+    """
+    Loads embeddings from .pt/.pth/.npy/.npz.
+    Handles Torch tensors saved in bfloat16 by upcasting to float32 before
+    converting to NumPy (NumPy lacks native bfloat16 support).
+    """
     p = Path(path)
     if p.suffix in {".pt", ".pth"}:
         if torch is None:
             raise RuntimeError("torch is required to load .pt embeddings")
-        emb = torch.load(p, map_location="cpu")
-        if isinstance(emb, torch.Tensor):
-            emb = emb.cpu().numpy()
+        emb_t = torch.load(p, map_location="cpu")
+        if isinstance(emb_t, torch.Tensor):
+            if emb_t.dtype == torch.bfloat16:
+                emb_t = emb_t.to(torch.float32)
+            emb = emb_t.detach().cpu().numpy()
         else:
-            emb = np.asarray(emb)
+            emb = np.asarray(emb_t)
     elif p.suffix in {".npy", ".npz"}:
         emb = np.load(p)
         if isinstance(emb, np.lib.npyio.NpzFile):
@@ -126,6 +147,7 @@ def load_embeddings(path: str) -> np.ndarray:
 def merge_nodes(
     graph: Dict, embeddings: np.ndarray, thr: float
 ) -> Tuple[Dict, Dict[int, int]]:
+    # Use ONLY existing edges as merge candidates (per your choice).
     edges = np.asarray(graph.get("edges", []), dtype=int)
     n = embeddings.shape[0]
     if edges.size == 0:
@@ -138,11 +160,13 @@ def merge_nodes(
         if sim >= thr:
             uf.union(s, o)
 
+    # Build groups
     groups: Dict[int, List[int]] = {}
     for idx in range(n):
         root = uf.find(idx)
         groups.setdefault(root, []).append(idx)
 
+    # Aggregate objects
     obj_pcls = graph["objects_pcl"]
     centers = graph["objects_center"]
     scales = graph.get("objects_scale")
@@ -160,7 +184,8 @@ def merge_nodes(
     new_glob: List[np.ndarray] = [] if glob_pcls is not None else []
 
     idx_map: Dict[int, int] = {}
-    for new_idx, members in enumerate(groups.values()):
+    # Deterministic order over groups for reproducibility
+    for new_idx, (root, members) in enumerate(sorted(groups.items(), key=lambda kv: kv[0])):
         pts_global: List[np.ndarray] = []
         feats: List[np.ndarray] = []
         glob_parts: List[np.ndarray] = [] if glob_pcls is not None else []
@@ -203,53 +228,81 @@ def merge_nodes(
         for m in members:
             idx_map[m] = new_idx
 
-    # Rebuild relationships
+    # --- Rebuild relationships via BUCKETING and aggregation ---
+    from collections import defaultdict
+
     id_to_idx = {oid: i for i, oid in enumerate(obj_ids)}
     pairs = graph.get("pairs", [])
     triples = graph.get("triples", [])
-    pred_cat = graph.get("predicate_cat", [])
-    pred_num = graph.get("predicate_num", [])
-    pred_pcl = graph.get("predicate_pcl_flag", [])
-    pred_dist = graph.get("predicate_dist", [])
+    pred_cat = graph.get("predicate_cat")
+    pred_num = graph.get("predicate_num")
+    pred_pcl = graph.get("predicate_pcl_flag")
+    pred_dist = graph.get("predicate_dist")
     pred_min = graph.get("predicate_min_dist")
     rel2frame = graph.get("rel2frame")
 
-    new_pairs: List[List[int]] = []
-    new_edges: List[List[int]] = []
-    new_pred_cat: List = []
-    new_pred_num: List = []
-    new_pred_pcl: List = []
-    new_pred_dist: List = []
-    new_pred_min: List = [] if pred_min is not None else []
-    new_rel2frame: Dict[Tuple[int, int], List] = {} if rel2frame is not None else {}
-    seen_pairs: set[Tuple[int, int]] = set()
-
+    # Bucket duplicate ordered edges (ia, ib) -> list of original pair indices
+    edge_buckets: Dict[Tuple[int, int], List[int]] = defaultdict(list)
     for i, (a_id, b_id) in enumerate(pairs):
+        if a_id not in id_to_idx or b_id not in id_to_idx:
+            continue
         ia = idx_map[id_to_idx[a_id]]
         ib = idx_map[id_to_idx[b_id]]
         if ia == ib:
             continue
-        key = (ia, ib)
-        if key in seen_pairs:
-            continue
-        seen_pairs.add(key)
-        new_pairs.append([new_id[ia], new_id[ib]])
-        new_edges.append([ia, ib])
-        if pred_cat:
-            new_pred_cat.append(pred_cat[i])
-        if pred_num:
-            new_pred_num.append(pred_num[i])
-        if pred_pcl:
-            new_pred_pcl.append(pred_pcl[i])
-        if pred_dist:
-            new_pred_dist.append(pred_dist[i])
-        if pred_min:
-            new_pred_min.append(pred_min[i])
-        if rel2frame is not None:
-            orig_key = (a_id, b_id)
-            frames = rel2frame.get(orig_key, [])
-            new_rel2frame[(new_id[ia], new_id[ib])] = frames
+        edge_buckets[(ia, ib)].append(i)
 
+    # Aggregated containers
+    new_pairs: List[List[int]] = []
+    new_edges: List[List[int]] = []
+    new_pred_cat: List = [] if pred_cat is not None else None
+    new_pred_num: List = [] if pred_num is not None else None
+    new_pred_pcl: List = [] if pred_pcl is not None else None
+    new_pred_dist: List = [] if pred_dist is not None else None
+    new_pred_min: List = [] if pred_min is not None else None
+    new_rel2frame: Dict[Tuple[int, int], List] = {} if rel2frame is not None else None
+
+    # Helper reducers (equal-weight)
+    def majority_vote(int_list: List[int]) -> int:
+        if not int_list:
+            return 0
+        arr = np.asarray(int_list, dtype=np.int64)
+        return int(np.argmax(np.bincount(arr)))
+
+    for (ia, ib), idxs in edge_buckets.items():
+        # record edge once
+        new_pairs.append([ia, ib])
+        new_edges.append([ia, ib])
+
+        if pred_cat is not None:
+            cats = [pred_cat[i] for i in idxs]
+            new_pred_cat.append(majority_vote(cats))
+
+        if pred_num is not None:
+            vals = [pred_num[i] for i in idxs]
+            new_pred_num.append(int(np.round(np.mean(vals))))
+
+        if pred_pcl is not None:
+            vals = [pred_pcl[i] for i in idxs]
+            new_pred_pcl.append(int(bool(np.any(vals))))
+
+        if pred_dist is not None:
+            vals = [pred_dist[i] for i in idxs]
+            new_pred_dist.append(float(np.mean(vals)))
+
+        if pred_min is not None:
+            vals = [pred_min[i] for i in idxs]
+            new_pred_min.append(float(np.min(vals)))
+
+        if rel2frame is not None:
+            frames = []
+            for i_edge in idxs:
+                a_id, b_id = pairs[i_edge]
+                frames.extend(rel2frame.get((a_id, b_id), []))
+            if new_rel2frame is not None:
+                new_rel2frame[(ia, ib)] = frames
+
+    # Triples: keep unique (subject, object, predicate) after remapping
     new_triples: List[List[int]] = []
     seen_triples: set[Tuple[int, int, int]] = set()
     for s_id, o_id, pred in triples:
@@ -263,12 +316,13 @@ def merge_nodes(
         if tkey in seen_triples:
             continue
         seen_triples.add(tkey)
-        new_triples.append([new_id[ns], new_id[no], pred])
+        new_triples.append([ns, no, pred])
 
+    # Write back aggregated graph
     graph["objects_pcl"] = [p.tolist() for p in new_pcl]
     graph["objects_center"] = new_center
     graph["objects_scale"] = new_scale
-    graph["objects_id"] = new_id
+    graph["objects_id"] = list(range(len(new_id)))  # stable 0..N-1
     if obj_cats is not None:
         graph["objects_cat"] = new_cat
     if obj_nums is not None:
@@ -280,26 +334,29 @@ def merge_nodes(
     graph["pairs"] = new_pairs
     graph["edges"] = new_edges
     graph["triples"] = new_triples
-    if pred_cat:
+
+    if new_pred_cat is not None:
         graph["predicate_cat"] = new_pred_cat
-    if pred_num:
+    if new_pred_num is not None:
         graph["predicate_num"] = new_pred_num
-    if pred_pcl:
+    if new_pred_pcl is not None:
         graph["predicate_pcl_flag"] = new_pred_pcl
-    if pred_dist:
+    if new_pred_dist is not None:
         graph["predicate_dist"] = new_pred_dist
-    if pred_min:
+    if new_pred_min is not None:
         graph["predicate_min_dist"] = new_pred_min
+
     graph["predicate_count"] = len(new_pairs)
-    if rel2frame is not None:
-        graph["rel2frame"] = new_rel2frame
+
+    if new_rel2frame is not None:
+        graph["rel2frame"] = new_rel2frame  # keys in new-id space (ia, ib)
 
     obj2frame = graph.get("object2frame")
     if obj2frame is not None:
         new_obj2frame: Dict[int, List] = {}
         for old_idx, frames in obj2frame.items():
             new_idx = idx_map[id_to_idx[int(old_idx)]]
-            new_obj2frame.setdefault(new_id[new_idx], []).extend(frames)
+            new_obj2frame.setdefault(new_idx, []).extend(frames)
         graph["object2frame"] = new_obj2frame
 
     return graph, idx_map
@@ -307,7 +364,10 @@ def merge_nodes(
 
 def main() -> None:
     args = parse_args()
-    scan_id = Path(args.graph).stem
+
+    # Option B: derive scan_id from the PARENT folder name (e.g., "scan0")
+    scan_id = Path(args.graph).parent.name
+
     obj_path = Path(
         args.embedding_dir, "export_obj_clip_emb_clip_OpenSeg", f"{scan_id}.pt"
     )
@@ -319,27 +379,46 @@ def main() -> None:
     )
 
     graph = load_graph(args.graph)
+
+    # ---- Load node embeddings (handles bf16 in loader) ----
     obj_emb = load_embeddings(str(obj_path))
     if torch is None:
         raise RuntimeError("torch is required to load .pt embeddings")
-    valids = torch.load(valid_path, map_location="cpu")
-    rel_emb = torch.load(rel_path, map_location="cpu")
-    valids = np.asarray(valids)
-    rel_emb = np.asarray(rel_emb)
+
+    # ---- Load valids / relation embeddings with bf16-safe casts ----
+    valids_t = torch.load(valid_path, map_location="cpu")
+    rel_emb_t = torch.load(rel_path, map_location="cpu")
+
+    if isinstance(valids_t, torch.Tensor):
+        # Typically bool/uint8; just move to CPU NumPy
+        valids = valids_t.detach().cpu().numpy()
+    else:
+        valids = np.asarray(valids_t)
+
+    if isinstance(rel_emb_t, torch.Tensor):
+        # Upcast from bfloat16 if needed before NumPy conversion
+        rel_emb = rel_emb_t.to(torch.float32).cpu().numpy()
+    else:
+        rel_emb = np.asarray(rel_emb_t, dtype=np.float32)
+
     pairs_orig = list(graph.get("pairs", []))
     obj_ids_orig = graph.get("objects_id", list(range(obj_emb.shape[0])))
+
+    # Merge nodes using existing edges + CLIP threshold
     merged, idx_map = merge_nodes(graph, obj_emb, args.threshold)
 
     from collections import defaultdict
 
+    # ---- Node embeddings: spherical mean over members (unweighted) ----
     emb_groups: Dict[int, List[np.ndarray]] = defaultdict(list)
     valid_groups: Dict[int, List[np.ndarray]] = defaultdict(list)
     for old_idx, new_idx in idx_map.items():
         emb_groups[new_idx].append(obj_emb[old_idx])
         valid_groups[new_idx].append(valids[old_idx])
+
     if emb_groups:
         new_obj_emb = np.stack(
-            [np.mean(emb_groups[i], axis=0) for i in range(len(emb_groups))]
+            [spherical_mean(np.stack(emb_groups[i], axis=0)) for i in range(len(emb_groups))]
         )
         new_valids = np.array(
             [np.any(valid_groups[i]) for i in range(len(valid_groups))]
@@ -348,6 +427,7 @@ def main() -> None:
         new_obj_emb = obj_emb
         new_valids = valids
 
+    # ---- Relation embeddings: bucket duplicates and spherical-mean per (ia, ib) ----
     rel_agg: Dict[Tuple[int, int], List[np.ndarray]] = defaultdict(list)
     id_to_idx = {oid: i for i, oid in enumerate(obj_ids_orig)}
     for i, (a_id, b_id) in enumerate(pairs_orig):
@@ -356,13 +436,17 @@ def main() -> None:
         if ia == ib:
             continue
         rel_agg[(ia, ib)].append(rel_emb[i])
+
     if merged.get("edges"):
-        new_rel_emb = np.stack(
-            [np.mean(rel_agg[(ia, ib)], axis=0) for ia, ib in merged["edges"]]
-        )
+        new_rel_emb = []
+        for ia, ib in merged["edges"]:
+            vecs = np.stack(rel_agg[(ia, ib)], axis=0)
+            new_rel_emb.append(spherical_mean(vecs))
+        new_rel_emb = np.stack(new_rel_emb, axis=0)
     else:
         new_rel_emb = np.zeros((0,) + rel_emb.shape[1:], dtype=rel_emb.dtype)
 
+    # ---- Write merged embeddings ----
     obj_out_dir = Path(args.embedding_out, "export_obj_clip_emb_clip_OpenSeg")
     obj_out_dir.mkdir(parents=True, exist_ok=True)
     valid_out_dir = Path(args.embedding_out, "export_obj_clip_valids")
@@ -373,6 +457,7 @@ def main() -> None:
     torch.save(torch.as_tensor(new_valids), valid_out_dir / f"{scan_id}.pt")
     torch.save(torch.as_tensor(new_rel_emb), rel_out_dir / f"{scan_id}.pt")
 
+    # ---- Visualization/exports ----
     import open3d as o3d
 
     inst_dir = Path(args.instances_out)
