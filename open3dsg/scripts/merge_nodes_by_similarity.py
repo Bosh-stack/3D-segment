@@ -20,8 +20,6 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from open3dsg.scripts.reconstruct_pointcloud import save_points
-
 try:  # optional dependency used for loading embeddings
     import torch
 except Exception:  # pragma: no cover - torch may be unavailable
@@ -304,17 +302,36 @@ def main() -> None:
 
     inst_dir = Path(args.instances_out)
     inst_dir.mkdir(parents=True, exist_ok=True)
+    palette = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [0.5, 0.5, 0.5],
+            [1.0, 0.5, 0.0],
+            [0.5, 0.0, 1.0],
+            [0.0, 0.5, 1.0],
+        ],
+        dtype=np.float32,
+    )
 
     points_all: List[np.ndarray] = []
     if "objects_pcl_glob" in merged and len(merged["objects_pcl_glob"]) > 0:
         obj_pcls = np.asarray(merged["objects_pcl_glob"], dtype=np.float32)
         for idx, obj in enumerate(obj_pcls):
             pts = np.asarray(obj, dtype=np.float32)
-            points_all.append(pts[:, :3])
+            color = palette[idx % len(palette)]
+            rgb = np.tile(color, (pts.shape[0], 1))
+            points_all.append(np.concatenate([pts[:, :3], rgb], axis=1))
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(pts[:, :3])
             if pts.shape[1] >= 6:
                 pcl.colors = o3d.utility.Vector3dVector(pts[:, 3:6])
+            else:
+                pcl.colors = o3d.utility.Vector3dVector(rgb)
             o3d.io.write_point_cloud(str(inst_dir / f"instance_{idx:04d}.ply"), pcl)
     else:
         obj_pcls = np.asarray(merged["objects_pcl"], dtype=np.float32)
@@ -329,15 +346,22 @@ def main() -> None:
                 coords = coords * np.asarray(scales[idx]).reshape(1, -1)
             coords = coords + centers[idx]
             pts[:, :3] = coords
-            points_all.append(coords)
+            color = palette[idx % len(palette)]
+            rgb = np.tile(color, (coords.shape[0], 1))
+            points_all.append(np.hstack([coords, rgb]))
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(pts[:, :3])
             if pts.shape[1] >= 6:
                 pcl.colors = o3d.utility.Vector3dVector(pts[:, 3:6])
+            else:
+                pcl.colors = o3d.utility.Vector3dVector(rgb)
             o3d.io.write_point_cloud(str(inst_dir / f"instance_{idx:04d}.ply"), pcl)
 
     full_points = np.concatenate(points_all, axis=0)
-    save_points(full_points, args.pointcloud_out)
+    pcl = o3d.geometry.PointCloud()
+    pcl.points = o3d.utility.Vector3dVector(full_points[:, :3])
+    pcl.colors = o3d.utility.Vector3dVector(full_points[:, 3:6])
+    o3d.io.write_point_cloud(str(args.pointcloud_out), pcl)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
