@@ -264,9 +264,10 @@ def merge_nodes(
 
     # Helper reducers (equal-weight)
     def majority_vote(int_list: List[int]) -> int:
+        """Return the most common class index."""
         if not int_list:
             return 0
-        arr = np.asarray(int_list, dtype=np.int64)
+        arr = np.asarray(int_list, dtype=np.int64).ravel()
         return int(np.argmax(np.bincount(arr)))
 
     for (ia, ib), idxs in edge_buckets.items():
@@ -275,7 +276,10 @@ def merge_nodes(
         new_edges.append([ia, ib])
 
         if pred_cat is not None:
-            cats = [pred_cat[i] for i in idxs]
+            cats = [
+                np.argmax(pred_cat[i]) if hasattr(pred_cat[i], "__len__") else int(pred_cat[i])
+                for i in idxs
+            ]
             new_pred_cat.append(majority_vote(cats))
 
         if pred_num is not None:
