@@ -324,7 +324,14 @@ def image_3d_mapping(scan: Path, inst_paths: List[Path], inst_pts: List[np.ndarr
     object2frame = {}
     name_map = {}
     for inst_idx, inst_path in enumerate(inst_paths):
-        top = [i for i, _ in sorted(scores[inst_idx], key=lambda x: -x[1])[:top_k]]
+        sorted_scores = sorted(scores[inst_idx], key=lambda x: -x[1])
+        pos_scores = [i for i, v in sorted_scores if v > 0]
+        if pos_scores:
+            top = pos_scores[:top_k]
+            while len(top) < top_k:
+                top.append(pos_scores[0])
+        else:
+            top = [i for i, _ in sorted_scores[:top_k]]
         object2frame[inst_idx] = [details[inst_idx][i] for i in top if i in details[inst_idx]]
         name_map[inst_idx] = inst_path.stem
 
