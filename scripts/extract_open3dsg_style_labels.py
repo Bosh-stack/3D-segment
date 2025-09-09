@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import os
 import pickle
-import re
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 
@@ -160,32 +159,17 @@ def predict_object_names(
 # --------------------------- relation generation ---------------------------- #
 
 def make_blip_prompts(pairs: List[Tuple[str, str]]) -> List[str]:
-    """
-    Use the same 'start with ...' trick to ease relation extraction (matches Open3DSG style).
-    """
+    """Construct BLIP prompts for generating caption and relation strings."""
     out = []
     for a, b in pairs:
         other = "other " if a == b else ""
         out.append(
-            f"Describe the relationship between the {a} and the {other}{b}. "
-            f"Start the response with: the {a}"
+            f"Describe the relationship between the {a} and the {other}{b}.\n"
+            "Respond in two lines:\n"
+            f"Caption: Start with \"the {a}\" and describe the scene.\n"
+            "Relation: Provide only the relation phrase between them (no object names or extra details)."
         )
     return out
-
-
-def extract_phrase_between(sent: str, a: str, b: str) -> str:
-    s = sent.strip().lower()
-    a, b = a.lower(), b.lower()
-    if a not in s or b not in s:
-        return "none"
-    try:
-        m = re.search(rf"{re.escape(a)}(.*?){re.escape(b)}", s)
-        rel = (m.group(1) if m else "").strip()
-        rel = rel.replace("the ", " ").strip()
-        rel = re.sub(r"\s+", " ", rel)
-        return rel if rel else "none"
-    except Exception:
-        return "none"
 
 
 @torch.no_grad()
@@ -205,7 +189,7 @@ def blip_generate_relations(
     E = edge_embs.shape[0]
     # if an embedding row is fully NaN, mark it
     mask_nan = torch.isnan(edge_embs).all(dim=-1).all(dim=-1)  # [E]
-    preds, full_caps = [], []
+    preds, caps = [], []
 
     for s in range(0, E, batch_size):
         e = min(E, s + batch_size)
@@ -228,20 +212,32 @@ def blip_generate_relations(
         out[out == processor.tokenizer.pad_token_id * 0 - 1] = processor.tokenizer.pad_token_id  # safety; keep like repo
         texts = processor.batch_decode(out, skip_special_tokens=True)
 
-        caps = [
-            qs[i].split(":")[-1] + " " + texts[i].rstrip().split(".")[0].split("\n")[0]
-            for i in range(len(texts))
-        ]
-        # apply NaN mask
-        m = mask_nan[s:e].cpu().numpy()
-        for i in range(len(caps)):
-            if m[i]:
-                caps[i] = "none"
+        m = mask_nan[s:e].tolist()
+        for i, text in enumerate(texts):
+            cap, rel = "none", "none"
+            if "Relation:" in text:
+                cap_part, rel_part = text.split("Relation:", 1)
+            else:
+                cap_part, rel_part = text, ""
+            if "Caption:" in cap_part:
+                cap = cap_part.split("Caption:", 1)[1].strip()
+            else:
+                cap = cap_part.strip()
+            rel = rel_part.strip().split("\n")[0].strip().rstrip(".")
 
-        rels = [extract_phrase_between(c, a, b) for c, (a, b) in zip(caps, pairs)]
-        preds.extend(rels)
-        full_caps.extend(caps)
-    return preds, full_caps
+            a, b = pairs[i]
+            rel_l = rel.lower()
+            if a.lower() in rel_l or b.lower() in rel_l:
+                print(f"[warn] relation contains object names: '{rel}' for pair ({a}, {b})")
+                rel = "none"
+
+            if m[i]:
+                cap, rel = "none", "none"
+
+            caps.append(cap if cap else "none")
+            preds.append(rel if rel else "none")
+
+    return preds, caps
 
 
 # ----------------------------------- CLI ------------------------------------ #
