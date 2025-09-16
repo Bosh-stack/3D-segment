@@ -22,6 +22,22 @@ The resulting directory contains::
       full_pc/    # full point cloud and visualised predictions
 
 All paths stored in ``graph.json`` are relative to the ``graph/`` folder.
+
+Example
+-------
+
+Assemble assets for ``scene0000_00`` from a JSON containing multiple scans::
+
+    python scripts/assemble_graph_assets.py \
+        --subgraph_json path/to/subgraphs.json \
+        --scan scene0000_00 \
+        --object2frame_dir path/to/object2frame \
+        --edge_tsv path/to/edges.tsv \
+        --ply_src path/to/masks \
+        --rgb_src path/to/rgb \
+        --vis_ply path/to/vis_pred.ply \
+        --pcd path/to/point_cloud.ply \
+        --out_dir graph_dir
 """
 
 from __future__ import annotations
@@ -62,6 +78,10 @@ def main() -> None:
     ap.add_argument("--pcd", required=True, help="original point cloud")
     ap.add_argument("--out_dir", required=True, help="destination graph directory")
     ap.add_argument("--top_k", type=int, default=None, help="limit frames per node")
+    ap.add_argument(
+        "--scan",
+        help="scan identifier to select when the subgraph JSON contains multiple scans",
+    )
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -73,7 +93,34 @@ def main() -> None:
 
     with open(args.subgraph_json, "r", encoding="utf-8") as f:
         sg = json.load(f)
-    nodes = sg.get("nodes") or sg.get("graph", {}).get("nodes", [])
+    nodes: List[dict] = []
+    scans_section = None
+    has_top_level_nodes = False
+    if isinstance(sg, dict):
+        has_top_level_nodes = "nodes" in sg or "graph" in sg
+        if has_top_level_nodes:
+            nodes = sg.get("nodes") or sg.get("graph", {}).get("nodes", [])
+        scans_section = sg.get("scans")
+    if not has_top_level_nodes and isinstance(scans_section, list):
+        if not args.scan:
+            raise ValueError(
+                "--scan is required when the subgraph JSON contains multiple scans"
+            )
+        selected_scan = None
+        for entry in scans_section:
+            if isinstance(entry, dict) and entry.get("scan") == args.scan:
+                selected_scan = entry
+                break
+        if selected_scan is None:
+            available = [
+                str(entry.get("scan"))
+                for entry in scans_section
+                if isinstance(entry, dict) and entry.get("scan") is not None
+            ]
+            raise ValueError(
+                f"Scan '{args.scan}' not found in {args.subgraph_json}. Available: {available}"
+            )
+        nodes = selected_scan.get("graph", {}).get("nodes", [])
 
     obj2frame, name_map = _load_object2frame(Path(args.object2frame_dir))
 
