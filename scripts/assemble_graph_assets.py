@@ -90,6 +90,8 @@ def main() -> None:
                 node_labels[s] = sn
             if dn:
                 node_labels[t] = dn
+            if s == t:
+                continue
             edges.append(
                 {
                     "source": s,
