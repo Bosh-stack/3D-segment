@@ -84,6 +84,14 @@ def main() -> None:
         for row in reader:
             s = int(row["src_idx"])
             t = int(row["dst_idx"])
+            sn = row.get("src_name", "").strip()
+            dn = row.get("dst_name", "").strip()
+            if sn:
+                override_names[s] = sn
+            if dn:
+                override_names[t] = dn
+            if s == t:
+                continue
             edges.append(
                 {
                     "source": s,
@@ -92,12 +100,6 @@ def main() -> None:
                     "caption": row.get("caption", ""),
                 }
             )
-            sn = row.get("src_name", "").strip()
-            dn = row.get("dst_name", "").strip()
-            if sn:
-                override_names[s] = sn
-            if dn:
-                override_names[t] = dn
 
     ply_src = Path(args.ply_src)
     rgb_src = Path(args.rgb_src)
