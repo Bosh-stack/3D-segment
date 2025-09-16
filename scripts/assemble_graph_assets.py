@@ -77,13 +77,19 @@ def main() -> None:
 
     obj2frame, name_map = _load_object2frame(Path(args.object2frame_dir))
 
-    override_names: Dict[int, str] = {}
+    node_labels: Dict[int, str] = {}
     edges = []
     with open(args.edge_tsv, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
             s = int(row["src_idx"])
             t = int(row["dst_idx"])
+            sn = str(row.get("src_name", "")).strip()
+            dn = str(row.get("dst_name", "")).strip()
+            if sn:
+                node_labels[s] = sn
+            if dn:
+                node_labels[t] = dn
             edges.append(
                 {
                     "source": s,
@@ -92,12 +98,6 @@ def main() -> None:
                     "caption": row.get("caption", ""),
                 }
             )
-            sn = row.get("src_name", "").strip()
-            dn = row.get("dst_name", "").strip()
-            if sn:
-                override_names[s] = sn
-            if dn:
-                override_names[t] = dn
 
     ply_src = Path(args.ply_src)
     rgb_src = Path(args.rgb_src)
@@ -108,7 +108,7 @@ def main() -> None:
 
         label = ""
         for candidate in (
-            override_names.get(idx),
+            node_labels.get(idx),
             name_map.get(idx),
             n.get("label"),
             n.get("name"),
