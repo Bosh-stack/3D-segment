@@ -32,7 +32,7 @@ import json
 import pickle
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set
 
 
 def _load_object2frame(pkl_dir: Path) -> tuple[Dict[int, List], Dict[int, str]]:
@@ -78,12 +78,15 @@ def main() -> None:
     obj2frame, name_map = _load_object2frame(Path(args.object2frame_dir))
 
     node_labels: Dict[int, str] = {}
+    node_ids: Set[int] = set()
     edges = []
     with open(args.edge_tsv, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
             s = int(row["src_idx"])
             t = int(row["dst_idx"])
+            node_ids.add(s)
+            node_ids.add(t)
             sn = str(row.get("src_name", "")).strip()
             dn = str(row.get("dst_name", "")).strip()
             if sn:
@@ -103,6 +106,12 @@ def main() -> None:
 
     ply_src = Path(args.ply_src)
     rgb_src = Path(args.rgb_src)
+
+    if not nodes:
+        nodes = [
+            {"inst_id": idx, "file": f"inst_{idx}.ply"}
+            for idx in sorted(node_ids)
+        ]
 
     nodes_out = []
     for n in nodes:
