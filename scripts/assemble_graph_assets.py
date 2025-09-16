@@ -84,22 +84,24 @@ def main() -> None:
         for row in reader:
             s = int(row["src_idx"])
             t = int(row["dst_idx"])
-            sn = row.get("src_name", "").strip()
-            dn = row.get("dst_name", "").strip()
-            if sn:
-                override_names[s] = sn
-            if dn:
-                override_names[t] = dn
-            if s == t:
-                continue
-            edges.append(
-                {
-                    "source": s,
-                    "target": t,
-                    "relation": row.get("relation", ""),
-                    "caption": row.get("caption", ""),
-                }
-            )
+
+            for idx, key in ((s, "src_name"), (t, "dst_name")):
+                name_val = row.get(key)
+                if not name_val:
+                    continue
+                name = str(name_val).strip()
+                if name:
+                    override_names[idx] = name
+
+            if s != t:
+                edges.append(
+                    {
+                        "source": s,
+                        "target": t,
+                        "relation": row.get("relation", ""),
+                        "caption": row.get("caption", ""),
+                    }
+                )
 
     ply_src = Path(args.ply_src)
     rgb_src = Path(args.rgb_src)
