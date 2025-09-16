@@ -120,11 +120,26 @@ def main() -> None:
             frame = fr[0]
             src_img = rgb_src / str(frame)
             if not src_img.exists():
-                cand = list(rgb_src.glob(f"{frame}.*"))
-                if cand:
-                    src_img = cand[0]
+                found_img = None
+                for sub in rgb_src.glob("images*"):
+                    if not sub.is_dir():
+                        continue
+                    sub_img = sub / str(frame)
+                    if sub_img.exists():
+                        found_img = sub_img
+                        break
+                    sub_candidates = list(sub.glob(f"{frame}.*"))
+                    if sub_candidates:
+                        found_img = sub_candidates[0]
+                        break
+                if found_img is not None:
+                    src_img = found_img
                 else:
-                    continue
+                    cand = list(rgb_src.glob(f"{frame}.*"))
+                    if cand:
+                        src_img = cand[0]
+                    else:
+                        continue
             dst_img_name = f"{idx}_{j}{src_img.suffix}"
             shutil.copy2(src_img, images_dir / dst_img_name)
             img_list.append(f"images/{dst_img_name}")
