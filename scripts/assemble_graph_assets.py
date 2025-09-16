@@ -105,7 +105,20 @@ def main() -> None:
     nodes_out = []
     for n in nodes:
         idx = int(n.get("inst_id", n.get("id")))
-        label = override_names.get(idx) or name_map.get(idx, "")
+
+        label = ""
+        for candidate in (
+            override_names.get(idx),
+            name_map.get(idx),
+            n.get("label"),
+            n.get("name"),
+        ):
+            if candidate:
+                label = str(candidate).strip()
+                if label:
+                    break
+        if not label:
+            label = str(idx)
 
         src_ply_name = Path(n.get("file", f"inst_{idx}.ply")).name
         src_ply = ply_src / src_ply_name
