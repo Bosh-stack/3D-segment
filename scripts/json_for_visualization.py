@@ -5,6 +5,7 @@
       graph.json
       masks/      # instance meshes
       images/     # RGB frames for each node
+      mask_overlays/  # RGB frames blended with mask projections
       full_pc/    # full point cloud and visualised predictions
 
 All paths stored in ``graph.json`` are relative to the ``graph/`` folder.
@@ -18,7 +19,45 @@ import json
 import pickle
 import shutil
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Sequence, Set
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+
+def _render_mask_overlay(
+    image_path: Path, pix_ids: Sequence[Sequence[int]] | np.ndarray | None, bbox: Sequence[float] | None
+) -> Image.Image:
+    """Return an RGBA image with ``pix_ids`` overlayed on top of ``image_path``."""
+
+    with Image.open(image_path) as handle:
+        img = handle.convert("RGB")
+    img = img.resize((320, 240))
+
+    if pix_ids is None:
+        pix_arr = np.empty((0, 2), dtype=np.int64)
+    else:
+        pix_arr = np.asarray(pix_ids, dtype=np.int64)
+        if pix_arr.ndim != 2 or pix_arr.shape[-1] != 2:
+            pix_arr = np.empty((0, 2), dtype=np.int64)
+
+    mask = np.zeros((240, 320), dtype=np.uint8)
+    if pix_arr.size:
+        rows = np.clip(pix_arr[:, 0], 0, 239)
+        cols = np.clip(pix_arr[:, 1], 0, 319)
+        mask[rows, cols] = 1
+
+    rgba = np.zeros((240, 320, 4), dtype=np.uint8)
+    rgba[..., 0] = 255  # red channel
+    rgba[..., 3] = 128  # alpha channel
+    overlay = Image.fromarray(rgba * mask[..., None], mode="RGBA")
+    blended = Image.alpha_composite(img.convert("RGBA"), overlay)
+
+    if bbox and len(bbox) == 4:
+        draw = ImageDraw.Draw(blended)
+        draw.rectangle(bbox, outline="yellow", width=2)
+
+    return blended
 
 
 def _load_object2frame(pkl_dir: Path) -> tuple[Dict[int, List], Dict[int, str]]:
@@ -57,8 +96,9 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     masks_dir = out_dir / "masks"
     images_dir = out_dir / "images"
+    overlays_dir = out_dir / "mask_overlays"
     full_pc_dir = out_dir / "full_pc"
-    for d in (masks_dir, images_dir, full_pc_dir):
+    for d in (masks_dir, images_dir, overlays_dir, full_pc_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     with open(args.subgraph_json, "r", encoding="utf-8") as f:
@@ -154,11 +194,22 @@ def main() -> None:
         shutil.copy2(src_ply, masks_dir / dst_ply_name)
 
         img_list: List[str] = []
+        overlay_list: List[str] = []
         frames = obj2frame.get(idx, [])
         if args.top_k is not None:
             frames = frames[: args.top_k]
         for j, fr in enumerate(frames):
-            frame = fr[0]
+            if isinstance(fr, dict):
+                frame = fr.get("image") or fr.get("frame") or fr.get("path") or fr.get("rgb")
+                bbox = fr.get("bbox") or fr.get("bbox_xyxy")
+                pix_ids = fr.get("pix_ids") or fr.get("pixel_idx") or fr.get("pixels")
+            else:
+                frame = fr[0]
+                bbox = fr[3] if len(fr) >= 4 else None
+                pix_ids = fr[4] if len(fr) >= 5 else None
+
+            if frame is None:
+                continue
             src_img = rgb_src / str(frame)
             if not src_img.exists():
                 found_img = None
@@ -185,12 +236,19 @@ def main() -> None:
             shutil.copy2(src_img, images_dir / dst_img_name)
             img_list.append(f"images/{dst_img_name}")
 
+            overlay_img = _render_mask_overlay(src_img, pix_ids, bbox)
+            overlay_name = f"{idx}_{j}.png"
+            overlay_path = overlays_dir / overlay_name
+            overlay_img.save(overlay_path)
+            overlay_list.append(f"mask_overlays/{overlay_name}")
+
         nodes_out.append(
             {
                 "id": idx,
                 "label": label,
                 "ply": f"masks/{dst_ply_name}",
                 "images": img_list,
+                "mask_overlays": overlay_list,
             }
         )
 
