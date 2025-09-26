@@ -21,32 +21,40 @@ def build_graph_for_scan(
     scan_dir: Path,
     inst_dir_name: str = "mask/vis_instances",
     max_edges_per_node: int = 10,
+    kd_voxel_size: float = 0.0,
 ):
     inst_files = sorted(Path(scan_dir, inst_dir_name).glob("inst_*.ply"))
     nodes = []
-    point_sets = []
+    kd_point_sets = []
     kdtrees = []
     for i, f in enumerate(inst_files):
-        pts = load_ply_points(f)
-        aabb = compute_aabb(pts)
-        centroid = pts.mean(axis=0).tolist()
+        pts_full = load_ply_points(f)
+        aabb = compute_aabb(pts_full)
+        centroid = pts_full.mean(axis=0).tolist()
         nodes.append({
             "inst_id": i,
             "file": str(f.relative_to(scan_dir)),
             "centroid": centroid,
             "aabb": aabb,
-            "n_points": int(pts.shape[0])
+            "n_points": int(pts_full.shape[0])
         })
-        point_sets.append(pts)
         pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(pts)
+        pc.points = o3d.utility.Vector3dVector(pts_full)
+        if kd_voxel_size > 0:
+            pc = pc.voxel_down_sample(voxel_size=kd_voxel_size)
+        kd_pts = np.asarray(pc.points)
+        if kd_pts.size == 0:
+            kd_pts = pts_full
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(kd_pts)
+        kd_point_sets.append(kd_pts)
         kdtrees.append(o3d.geometry.KDTreeFlann(pc))
 
     edges = []
     if len(nodes) > 1:
         def min_distance(idx_a: int, idx_b: int):
-            pts_a = point_sets[idx_a]
-            pts_b = point_sets[idx_b]
+            pts_a = kd_point_sets[idx_a]
+            pts_b = kd_point_sets[idx_b]
             if pts_a.size == 0 or pts_b.size == 0:
                 return float("inf")
             if pts_a.shape[0] <= pts_b.shape[0]:
@@ -64,11 +72,24 @@ def build_graph_for_scan(
             return float(np.sqrt(min_sq)) if np.isfinite(min_sq) else float("inf")
 
         n_nodes = len(nodes)
+        centroids = np.asarray([node["centroid"] for node in nodes], dtype=np.float64)
         distance_cache = {}
         added_edges = set()
         for i in range(n_nodes):
+            centroid_dists = np.linalg.norm(centroids - centroids[i], axis=1)
+            centroid_dists[i] = np.inf
+            oversample = max(max_edges_per_node * 4, max_edges_per_node)
+            candidate_count = min(n_nodes - 1, oversample)
+            if candidate_count <= 0:
+                continue
+            if candidate_count < centroid_dists.size:
+                partition_idx = candidate_count - 1
+                candidate_indices = np.argpartition(centroid_dists, partition_idx)[:candidate_count]
+            else:
+                candidate_indices = np.argsort(centroid_dists)
+
             neighbor_dists = []
-            for j in range(n_nodes):
+            for j in candidate_indices:
                 if i == j:
                     continue
                 key = (min(i, j), max(i, j))
@@ -96,6 +117,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--split", default="train")
     ap.add_argument("--max_edges_per_node", type=int, default=10)
+    ap.add_argument(
+        "--kd_voxel_size",
+        type=float,
+        default=0.0,
+        help=(
+            "Voxel size used to downsample instance point clouds before building the "
+            "KD-tree (0 disables downsampling)."
+        ),
+    )
     args = ap.parse_args()
 
     root = Path(args.root)
@@ -107,7 +137,11 @@ def main():
         graphs.append({
             "scan": scan_id,
             "split": 0,
-            "graph": build_graph_for_scan(scan, max_edges_per_node=args.max_edges_per_node)
+            "graph": build_graph_for_scan(
+                scan,
+                max_edges_per_node=args.max_edges_per_node,
+                kd_voxel_size=args.kd_voxel_size,
+            )
         })
 
     out_dir = Path(args.out) / "graphs"
