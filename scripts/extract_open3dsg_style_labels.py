@@ -191,9 +191,18 @@ def blip_generate_relations(
     mask_nan = torch.isnan(edge_embs).all(dim=-1).all(dim=-1)  # [E]
     preds, caps = [], []
 
+    model_dtype: Optional[torch.dtype] = None
+    try:
+        model_dtype = next(blip.parameters()).dtype
+    except StopIteration:
+        model_dtype = None
+
     for s in range(0, E, batch_size):
         e = min(E, s + batch_size)
         img_emb = edge_embs[s:e].to(device)
+        if model_dtype is not None and img_emb.is_floating_point():
+            if device.type == "cuda" and img_emb.dtype != model_dtype:
+                img_emb = img_emb.to(model_dtype)
         pairs = name_pairs[s:e]
         qs = make_blip_prompts(pairs)
 
@@ -255,12 +264,32 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--device", default=None, help="cpu/cuda")
     ap.add_argument("--hf_model", default="Salesforce/instructblip-flan-t5-xl",
                     help="Hugging Face model id for InstructBLIP (e.g., Salesforce/instructblip-flan-t5-xl)")
+    ap.add_argument(
+        "--torch_dtype",
+        default="auto",
+        choices=["auto", "float32", "float16", "bfloat16"],
+        help=(
+            "Torch dtype for loading InstructBLIP. Half/bfloat16 reduce memory and speed up GPU inference,"
+            " but require CUDA support."
+        ),
+    )
     return ap.parse_args()
 
 
 def main():
     args = parse_args()
     device = torch.device(args.device) if args.device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype_lookup = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+    torch_dtype_arg = args.torch_dtype.lower()
+    if torch_dtype_arg != "auto" and torch_dtype_arg not in dtype_lookup:
+        raise ValueError(f"Unsupported torch dtype: {args.torch_dtype}")
+    model_dtype = dtype_lookup.get(torch_dtype_arg)
+    if device.type == "cpu" and model_dtype in {torch.float16, torch.bfloat16}:
+        raise ValueError("Half-precision dtypes require CUDA. Choose float32 or auto on CPU.")
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
 
     # Load graph/edges and features
@@ -296,9 +325,11 @@ def main():
         edge_embs = edge_embs[:n]
 
     # Load InstructBLIP (HF weights)
-    print(f"[info] Loading InstructBLIP: {args.hf_model} on {device} ...")
+    dtype_msg = torch_dtype_arg if torch_dtype_arg == "auto" else str(model_dtype)
+    print(f"[info] Loading InstructBLIP: {args.hf_model} on {device} (dtype={dtype_msg}) ...")
     processor = InstructBlipProcessor.from_pretrained(args.hf_model)
-    blip = InstructBlipForConditionalGeneration.from_pretrained(args.hf_model)
+    from_pretrained_kwargs = {"torch_dtype": torch_dtype_arg if torch_dtype_arg == "auto" else model_dtype}
+    blip = InstructBlipForConditionalGeneration.from_pretrained(args.hf_model, **from_pretrained_kwargs)
     blip.eval().to(device)
 
     # Edge relations via BLIP+LLM over relation image embeddings
