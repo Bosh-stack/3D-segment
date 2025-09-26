@@ -4,8 +4,10 @@ set -e
 ROOT=/data/Open3DSG_trainset
 OUT_GRAPH=open3dsg/output/graphs/myset
 OUT_PREPROC=open3dsg/output/preprocessed/myset
+KD_VOXEL_SIZE=0.02
 
-python open3dsg/data/gen_myset_subgraphs.py --root $ROOT --out $OUT_GRAPH --split train
+python open3dsg/data/gen_myset_subgraphs.py --root $ROOT --out $OUT_GRAPH --split train \
+  --kd_voxel_size $KD_VOXEL_SIZE
 python open3dsg/data/get_object_frame_myset.py --root $ROOT --out $OUT_PREPROC/frames --top_k 5
 python open3dsg/data/preprocess_myset.py --root $ROOT \
   --graphs $OUT_GRAPH/graphs/train.json --frames $OUT_PREPROC/frames \
