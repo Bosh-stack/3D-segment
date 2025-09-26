@@ -17,10 +17,15 @@ def compute_aabb(points: np.ndarray):
     return [mn.tolist(), mx.tolist()]
 
 
-def build_graph_for_scan(scan_dir: Path, inst_dir_name: str = "mask/vis_instances"):
+def build_graph_for_scan(
+    scan_dir: Path,
+    inst_dir_name: str = "mask/vis_instances",
+    max_edges_per_node: int = 10,
+):
     inst_files = sorted(Path(scan_dir, inst_dir_name).glob("inst_*.ply"))
     nodes = []
-    centers = []
+    point_sets = []
+    kdtrees = []
     for i, f in enumerate(inst_files):
         pts = load_ply_points(f)
         aabb = compute_aabb(pts)
@@ -32,29 +37,55 @@ def build_graph_for_scan(scan_dir: Path, inst_dir_name: str = "mask/vis_instance
             "aabb": aabb,
             "n_points": int(pts.shape[0])
         })
-        centers.append(np.array(centroid))
+        point_sets.append(pts)
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(pts)
+        kdtrees.append(o3d.geometry.KDTreeFlann(pc))
 
-    centers = np.stack(centers) if len(centers) else np.zeros((0, 3))
     edges = []
     if len(nodes) > 1:
-        diags = [np.linalg.norm(np.array(n["aabb"][1]) - np.array(n["aabb"][0])) for n in nodes]
-        mean_diag = float(np.mean(diags)) if diags else 1.0
-        thresh = 1.5 * mean_diag
+        def min_distance(idx_a: int, idx_b: int):
+            pts_a = point_sets[idx_a]
+            pts_b = point_sets[idx_b]
+            if pts_a.size == 0 or pts_b.size == 0:
+                return float("inf")
+            if pts_a.shape[0] <= pts_b.shape[0]:
+                base_idx, query_pts = idx_a, pts_b
+            else:
+                base_idx, query_pts = idx_b, pts_a
+            kd_tree = kdtrees[base_idx]
+            min_sq = float("inf")
+            for pt in query_pts:
+                _, _, sq_dists = kd_tree.search_knn_vector_3d(pt, 1)
+                if sq_dists:
+                    sq = sq_dists[0]
+                    if sq < min_sq:
+                        min_sq = sq
+            return float(np.sqrt(min_sq)) if np.isfinite(min_sq) else float("inf")
 
-        pairs = []
-        for i in range(len(nodes)):
-            for j in range(i + 1, len(nodes)):
-                d = np.linalg.norm(centers[i] - centers[j])
-                if d < thresh:
-                    pairs.append((d, i, j))
+        n_nodes = len(nodes)
+        distance_cache = {}
+        added_edges = set()
+        for i in range(n_nodes):
+            neighbor_dists = []
+            for j in range(n_nodes):
+                if i == j:
+                    continue
+                key = (min(i, j), max(i, j))
+                if key not in distance_cache:
+                    distance_cache[key] = min_distance(*key)
+                dist = distance_cache[key]
+                neighbor_dists.append((dist, j))
 
-        pairs.sort(key=lambda x: x[0])
-        deg = {i: 0 for i in range(len(nodes))}
-        for _, i, j in pairs:
-            if deg[i] < 10 and deg[j] < 10:
-                edges.append([i, j, "spatial"])
-                deg[i] += 1
-                deg[j] += 1
+            neighbor_dists.sort(key=lambda x: x[0])
+            for dist, j in neighbor_dists[:max_edges_per_node]:
+                if not np.isfinite(dist):
+                    continue
+                key = (min(i, j), max(i, j))
+                if key in added_edges:
+                    continue
+                edges.append([key[0], key[1], "spatial"])
+                added_edges.add(key)
 
     return {"nodes": nodes, "edges": edges}
 
@@ -64,6 +95,7 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--split", default="train")
+    ap.add_argument("--max_edges_per_node", type=int, default=10)
     args = ap.parse_args()
 
     root = Path(args.root)
@@ -75,7 +107,7 @@ def main():
         graphs.append({
             "scan": scan_id,
             "split": 0,
-            "graph": build_graph_for_scan(scan)
+            "graph": build_graph_for_scan(scan, max_edges_per_node=args.max_edges_per_node)
         })
 
     out_dir = Path(args.out) / "graphs"
